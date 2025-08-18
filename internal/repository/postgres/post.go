@@ -45,6 +45,72 @@ func (r *postRepository) GetByID(ctx context.Context, id int64) (*entity.Post, e
 	return &post, nil
 }
 
+func (r *postRepository) Update(ctx context.Context, post *entity.Post) error {
+	query := `UPDATE posts 
+              SET title = $1, content = $2
+              WHERE id = $3`
+
+	result, err := r.db.ExecContext(ctx, query, post.Title, post.Content, post.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update post: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("post not found with id: %d", post.ID)
+	}
+
+	return nil
+}
+
+func (r *postRepository) Delete(ctx context.Context, id int64) error {
+	query := `DELETE FROM posts WHERE id = $1`
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete post: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("post not found with id: %d", id)
+	}
+
+	return nil
+}
+
+func (r *postRepository) ListByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, error) {
+	query := `SELECT p.id, p.topic_id, p.title, p.content, p.author_id, p.created_at 
+              FROM posts p
+              JOIN post_tags pt ON p.id = pt.post_id
+              WHERE pt.tag_id = $1
+              ORDER BY p.created_at DESC
+              LIMIT $2 OFFSET $3`
+
+	rows, err := r.db.QueryContext(ctx, query, tagID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list posts by tag: %w", err)
+	}
+	defer rows.Close()
+
+	var posts []*entity.Post
+	for rows.Next() {
+		var p entity.Post
+		if err := rows.Scan(&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan post: %w", err)
+		}
+		posts = append(posts, &p)
+	}
+	return posts, nil
+}
+
 func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit int, offset int) ([]*entity.Post, error) {
 	const query = `SELECT id, topic_id, content, author_id, created_at 
 				   FROM posts WHERE topic_id = $1 
@@ -70,5 +136,28 @@ func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit i
 		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 
+	return posts, nil
+}
+
+func (r *postRepository) List(ctx context.Context, limit, offset int) ([]*entity.Post, error) {
+	query := `SELECT id, topic_id, title, content, author_id, created_at 
+              FROM posts 
+              ORDER BY created_at DESC
+              LIMIT $1 OFFSET $2`
+
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list posts: %w", err)
+	}
+	defer rows.Close()
+
+	var posts []*entity.Post
+	for rows.Next() {
+		var p entity.Post
+		if err := rows.Scan(&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan post: %w", err)
+		}
+		posts = append(posts, &p)
+	}
 	return posts, nil
 }

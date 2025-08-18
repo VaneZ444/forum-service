@@ -2,59 +2,108 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
 )
 
-var (
-	ErrTagNotFound = errors.New("tag not found")
-)
-
 type TagUseCase interface {
 	CreateTag(ctx context.Context, name string) (int64, error)
 	GetTagByID(ctx context.Context, id int64) (*entity.Tag, error)
-	ListTags(ctx context.Context) ([]*entity.Tag, error)
+	List(ctx context.Context, limit, offset int) ([]*entity.Tag, error)
 	ListTagsByPostID(ctx context.Context, postID int64) ([]*entity.Tag, error)
+	AddTagToPost(ctx context.Context, postID, tagID int64) error
+	RemoveTagFromPost(ctx context.Context, postID, tagID int64) error
 }
 
 type tagUseCase struct {
-	tagRepo repository.TagRepository
-	logger  *slog.Logger
+	tagRepo  repository.TagRepository
+	postRepo repository.PostRepository
+	logger   *slog.Logger
 }
 
-func NewTagUseCase(tagRepo repository.TagRepository, logger *slog.Logger) TagUseCase {
+func NewTagUseCase(
+	tagRepo repository.TagRepository,
+	postRepo repository.PostRepository,
+	logger *slog.Logger,
+) TagUseCase {
 	return &tagUseCase{
-		tagRepo: tagRepo,
-		logger:  logger,
+		tagRepo:  tagRepo,
+		postRepo: postRepo,
+		logger:   logger,
 	}
 }
 
-func (uc *tagUseCase) CreateTag(ctx context.Context, name string) (int64, error) {
-	tag := &entity.Tag{Name: name}
+func (uc *tagUseCase) CreateTag(ctx context.Context, title string) (int64, error) {
+	tag := &entity.Tag{
+		Title: title,
+	}
+
 	id, err := uc.tagRepo.Create(ctx, tag)
 	if err != nil {
 		uc.logger.Error("failed to create tag", slog.String("err", err.Error()))
 		return 0, err
 	}
+
 	return id, nil
 }
 
 func (uc *tagUseCase) GetTagByID(ctx context.Context, id int64) (*entity.Tag, error) {
 	tag, err := uc.tagRepo.GetByID(ctx, id)
 	if err != nil {
-		uc.logger.Warn("tag not found", slog.Int64("id", id), slog.String("err", err.Error()))
+		uc.logger.Warn("tag not found", slog.Int64("id", id))
 		return nil, ErrTagNotFound
 	}
 	return tag, nil
 }
 
-func (uc *tagUseCase) ListTags(ctx context.Context) ([]*entity.Tag, error) {
-	return uc.tagRepo.List(ctx)
+func (uc *tagUseCase) List(ctx context.Context, limit, offset int) ([]*entity.Tag, error) {
+	if limit <= 0 || limit > 100 {
+		return nil, ErrInvalidLimit
+	}
+	if offset < 0 {
+		return nil, ErrInvalidOffset
+	}
+	return uc.tagRepo.List(ctx, limit, offset)
 }
 
 func (uc *tagUseCase) ListTagsByPostID(ctx context.Context, postID int64) ([]*entity.Tag, error) {
+	_, err := uc.postRepo.GetByID(ctx, postID)
+	if err != nil {
+		uc.logger.Warn("post not found", slog.Int64("postID", postID))
+		return nil, ErrPostNotFound
+	}
 	return uc.tagRepo.ListByPostID(ctx, postID)
+}
+
+func (uc *tagUseCase) AddTagToPost(ctx context.Context, postID, tagID int64) error {
+	_, err := uc.postRepo.GetByID(ctx, postID)
+	if err != nil {
+		uc.logger.Warn("post not found", slog.Int64("postID", postID))
+		return ErrPostNotFound
+	}
+
+	_, err = uc.tagRepo.GetByID(ctx, tagID)
+	if err != nil {
+		uc.logger.Warn("tag not found", slog.Int64("tagID", tagID))
+		return ErrTagNotFound
+	}
+
+	err = uc.tagRepo.AddToPost(ctx, postID, tagID)
+	if err != nil {
+		uc.logger.Error("failed to add tag to post", slog.String("err", err.Error()))
+		return err
+	}
+
+	return nil
+}
+
+func (uc *tagUseCase) RemoveTagFromPost(ctx context.Context, postID, tagID int64) error {
+	err := uc.tagRepo.RemoveFromPost(ctx, postID, tagID)
+	if err != nil {
+		uc.logger.Error("failed to remove tag from post", slog.String("err", err.Error()))
+		return err
+	}
+	return nil
 }
