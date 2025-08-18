@@ -41,27 +41,30 @@ func (r *commentRepository) GetByID(ctx context.Context, id int64) (*entity.Comm
 	return &c, nil
 }
 
-func (r *commentRepository) ListByPostID(ctx context.Context, postID int64, limit, offset int) ([]*entity.Comment, error) {
-	const query = `SELECT id, post_id, content, author_id, created_at FROM comments WHERE post_id = $1 ORDER BY created_at LIMIT $2 OFFSET $3`
+func (r *commentRepository) ListByPost(ctx context.Context, postID int64, limit, offset int) ([]*entity.Comment, int64, error) {
+	const countQ = `SELECT COUNT(*) FROM comments WHERE post_id = $1`
+	var total int64
+	if err := r.db.QueryRowContext(ctx, countQ, postID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count comments: %w", err)
+	}
 
-	rows, err := r.db.QueryContext(ctx, query, postID, limit, offset)
+	const q = `SELECT id, post_id, content, author_id, created_at, updated_at
+               FROM comments WHERE post_id = $1
+               ORDER BY created_at ASC
+               LIMIT $2 OFFSET $3`
+	rows, err := r.db.QueryContext(ctx, q, postID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list comments: %w", err)
+		return nil, 0, fmt.Errorf("failed to list comments: %w", err)
 	}
 	defer rows.Close()
 
-	var comments []*entity.Comment
+	var items []*entity.Comment
 	for rows.Next() {
-		var c entity.Comment
-		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan comment: %w", err)
+		c := new(entity.Comment)
+		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, 0, err
 		}
-		comments = append(comments, &c)
+		items = append(items, c)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return comments, nil
+	return items, total, nil
 }

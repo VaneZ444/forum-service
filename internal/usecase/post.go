@@ -11,10 +11,10 @@ import (
 )
 
 type PostUseCase interface {
-	CreatePost(ctx context.Context, topicID int64, authorID int64, title, content string) (int64, error)
+	CreatePost(ctx context.Context, post *entity.Post) (int64, error)
 	GetPostByID(ctx context.Context, id int64) (*entity.Post, error)
-	ListPostsByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, error)
-	ListPosts(ctx context.Context, limit, offset int) ([]*entity.Post, error)
+	ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, error)
+	List(ctx context.Context, topicID, tagID int64, limit, offset int) ([]*entity.Post, int64, error)
 	UpdatePost(ctx context.Context, id int64, title, content string) (*entity.Post, error)
 	DeletePost(ctx context.Context, id int64) error
 	ListPostsByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, error)
@@ -41,20 +41,14 @@ func NewPostUseCase(
 	}
 }
 
-func (uc *postUseCase) CreatePost(ctx context.Context, topicID int64, authorID int64, title, content string) (int64, error) {
-	_, err := uc.topicRepo.GetByID(ctx, topicID)
+func (uc *postUseCase) CreatePost(ctx context.Context, post *entity.Post) (int64, error) {
+	_, err := uc.topicRepo.GetByID(ctx, post.TopicID)
 	if err != nil {
-		uc.logger.Warn("topic not found", slog.Int64("topicID", topicID))
+		uc.logger.Warn("topic not found", slog.Int64("topicID", post.TopicID))
 		return 0, ErrTopicNotFound
 	}
 
-	post := &entity.Post{
-		TopicID:   topicID,
-		AuthorID:  authorID,
-		Title:     title,
-		Content:   content,
-		CreatedAt: time.Now().Unix(),
-	}
+	post.CreatedAt = time.Now().Unix()
 
 	id, err := uc.postRepo.Create(ctx, post)
 	if err != nil {
@@ -74,7 +68,7 @@ func (uc *postUseCase) GetPostByID(ctx context.Context, id int64) (*entity.Post,
 	return post, nil
 }
 
-func (uc *postUseCase) ListPostsByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, error) {
+func (uc *postUseCase) ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, error) {
 	if limit <= 0 || limit > 100 {
 		return nil, ErrInvalidLimit
 	}
@@ -84,14 +78,19 @@ func (uc *postUseCase) ListPostsByTopic(ctx context.Context, topicID int64, limi
 	return uc.postRepo.ListByTopic(ctx, topicID, limit, offset)
 }
 
-func (uc *postUseCase) ListPosts(ctx context.Context, limit, offset int) ([]*entity.Post, error) {
+func (uc *postUseCase) List(ctx context.Context, topicID, tagID int64, limit, offset int) ([]*entity.Post, int64, error) {
 	if limit <= 0 || limit > 100 {
-		return nil, ErrInvalidLimit
+		return nil, 0, ErrInvalidLimit
 	}
 	if offset < 0 {
-		return nil, ErrInvalidOffset
+		return nil, 0, ErrInvalidOffset
 	}
-	return uc.postRepo.List(ctx, limit, offset)
+
+	posts, total, err := uc.postRepo.List(ctx, topicID, tagID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return posts, total, nil
 }
 
 func (uc *postUseCase) UpdatePost(ctx context.Context, id int64, title, content string) (*entity.Post, error) {

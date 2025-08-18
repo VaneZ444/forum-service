@@ -7,9 +7,10 @@ import (
 )
 
 type TopicRepository interface {
-	Create(ctx context.Context, topic *entity.Topic) (int64, error)
+	CreateWithPost(ctx context.Context, topic *entity.Topic, post *entity.Post) error
 	GetByID(ctx context.Context, id int64) (*entity.Topic, error)
-	ListByCategory(ctx context.Context, categoryID int64, limit, offset int) ([]*entity.Topic, error)
+	GetByIDWithFirstPost(ctx context.Context, id int64) (*entity.Topic, *entity.Post, error)
+	List(ctx context.Context, categoryID int64, limit, offset int) ([]*entity.Topic, int64, error)
+	Update(ctx context.Context, topic *entity.Topic) error
 	Delete(ctx context.Context, id int64) error
-	UpdateTopic(ctx context.Context, topic *entity.Topic) error
 }

@@ -6,4 +6,5 @@ type Comment struct {
 	Content   string
 	AuthorID  int64
 	CreatedAt int64
+	UpdatedAt int64
 }

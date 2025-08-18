@@ -3,16 +3,18 @@ package usecase
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
+	"github.com/gosimple/slug"
 )
 
 type CategoryUseCase interface {
-	CreateCategory(ctx context.Context, title, description string) (int64, error)
+	CreateCategory(ctx context.Context, category *entity.Category) error
 	GetByID(ctx context.Context, id int64) (*entity.Category, error)
-	List(ctx context.Context, limit, offset int) ([]*entity.Category, error)
-	UpdateCategory(ctx context.Context, id int64, title, description string) (*entity.Category, error)
+	List(ctx context.Context, limit, offset int) ([]*entity.Category, int64, error)
+	UpdateCategory(ctx context.Context, category *entity.Category) error
 	DeleteCategory(ctx context.Context, id int64) error
 }
 
@@ -28,69 +30,75 @@ func NewCategoryUseCase(categoryRepo repository.CategoryRepository, logger *slog
 	}
 }
 
-func (uc *categoryUseCase) CreateCategory(ctx context.Context, title, slug string) (int64, error) {
-	existing, err := uc.categoryRepo.GetBySlug(ctx, slug)
+func (uc *categoryUseCase) CreateCategory(ctx context.Context, category *entity.Category) error {
+	// Generate slug if not provided
+	if category.Slug == "" {
+		category.Slug = slug.Make(category.Title)
+	}
+
+	// Check if slug exists
+	existing, err := uc.categoryRepo.GetBySlug(ctx, category.Slug)
 	if err == nil && existing != nil {
-		uc.logger.Warn("category already exists", slog.String("slug", slug))
-		return 0, ErrCategoryAlreadyExists
+		uc.logger.Warn("category already exists", slog.String("slug", category.Slug))
+		return ErrCategoryAlreadyExists
 	}
 
-	category := &entity.Category{
-		Title: title,
-		Slug:  slug,
-	}
+	// Set timestamps
+	now := time.Now().UnixMilli()
+	category.CreatedAt = now
+	category.UpdatedAt = now
 
-	id, err := uc.categoryRepo.Create(ctx, category)
-	if err != nil {
-		uc.logger.Error("failed to create category", slog.String("err", err.Error()))
-		return 0, err
-	}
-
-	return id, nil
+	return uc.categoryRepo.Create(ctx, category)
 }
 
 func (uc *categoryUseCase) GetByID(ctx context.Context, id int64) (*entity.Category, error) {
 	category, err := uc.categoryRepo.GetByID(ctx, id)
 	if err != nil {
-		return nil, ErrCategoryNotFound
+		if err == repository.ErrNotFound {
+			return nil, ErrCategoryNotFound
+		}
+		return nil, err
 	}
 	return category, nil
 }
 
-func (uc *categoryUseCase) List(ctx context.Context, limit, offset int) ([]*entity.Category, error) {
+func (uc *categoryUseCase) List(ctx context.Context, limit, offset int) ([]*entity.Category, int64, error) {
 	if limit <= 0 || limit > 100 {
-		return nil, ErrInvalidLimit
+		limit = 50
 	}
 	if offset < 0 {
-		return nil, ErrInvalidOffset
+		offset = 0
 	}
-	return uc.categoryRepo.List(ctx, limit, offset)
+
+	categories, err := uc.categoryRepo.List(ctx, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := uc.categoryRepo.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return categories, total, nil
 }
 
-func (uc *categoryUseCase) UpdateCategory(ctx context.Context, id int64, title, description string) (*entity.Category, error) {
-	category, err := uc.categoryRepo.GetByID(ctx, id)
+func (uc *categoryUseCase) UpdateCategory(ctx context.Context, category *entity.Category) error {
+	existing, err := uc.categoryRepo.GetByID(ctx, category.ID)
 	if err != nil {
-		uc.logger.Warn("category not found for update", slog.Int64("id", id))
-		return nil, ErrCategoryNotFound
+		if err == repository.ErrNotFound {
+			return ErrCategoryNotFound
+		}
+		return err
 	}
 
-	category.Title = title
-	category.Description = description
+	// Preserve created_at
+	category.CreatedAt = existing.CreatedAt
+	category.UpdatedAt = time.Now().UnixMilli()
 
-	err = uc.categoryRepo.Update(ctx, category)
-	if err != nil {
-		uc.logger.Error("failed to update category", slog.String("err", err.Error()))
-		return nil, ErrUpdateFailed
-	}
-
-	return category, nil
+	return uc.categoryRepo.Update(ctx, category)
 }
 
 func (uc *categoryUseCase) DeleteCategory(ctx context.Context, id int64) error {
-	err := uc.categoryRepo.Delete(ctx, id)
-	if err != nil {
-		uc.logger.Error("failed to delete category", slog.String("err", err.Error()))
-		return ErrDeleteFailed
-	}
-	return nil
+	return uc.categoryRepo.Delete(ctx, id)
 }

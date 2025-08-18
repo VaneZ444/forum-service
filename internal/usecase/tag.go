@@ -3,15 +3,17 @@ package usecase
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
 )
 
 type TagUseCase interface {
-	CreateTag(ctx context.Context, name string) (int64, error)
+	CreateTag(ctx context.Context, tag *entity.Tag) error
 	GetTagByID(ctx context.Context, id int64) (*entity.Tag, error)
-	List(ctx context.Context, limit, offset int) ([]*entity.Tag, error)
+	GetTagBySlug(ctx context.Context, slug string) (*entity.Tag, error)
+	List(ctx context.Context, limit, offset int) ([]*entity.Tag, int64, error)
 	ListTagsByPostID(ctx context.Context, postID int64) ([]*entity.Tag, error)
 	AddTagToPost(ctx context.Context, postID, tagID int64) error
 	RemoveTagFromPost(ctx context.Context, postID, tagID int64) error
@@ -35,18 +37,19 @@ func NewTagUseCase(
 	}
 }
 
-func (uc *tagUseCase) CreateTag(ctx context.Context, title string) (int64, error) {
-	tag := &entity.Tag{
-		Title: title,
+func (uc *tagUseCase) CreateTag(ctx context.Context, tag *entity.Tag) error {
+	if tag.Slug == "" {
+		tag.Slug = strings.ToLower(strings.ReplaceAll(tag.Name, " ", "-"))
 	}
 
 	id, err := uc.tagRepo.Create(ctx, tag)
 	if err != nil {
 		uc.logger.Error("failed to create tag", slog.String("err", err.Error()))
-		return 0, err
+		return err
 	}
 
-	return id, nil
+	tag.ID = id
+	return nil
 }
 
 func (uc *tagUseCase) GetTagByID(ctx context.Context, id int64) (*entity.Tag, error) {
@@ -57,13 +60,20 @@ func (uc *tagUseCase) GetTagByID(ctx context.Context, id int64) (*entity.Tag, er
 	}
 	return tag, nil
 }
-
-func (uc *tagUseCase) List(ctx context.Context, limit, offset int) ([]*entity.Tag, error) {
+func (uc *tagUseCase) GetTagBySlug(ctx context.Context, slug string) (*entity.Tag, error) {
+	tag, err := uc.tagRepo.GetBySlug(ctx, slug)
+	if err != nil {
+		uc.logger.Warn("tag not found", slog.String("slug", slug))
+		return nil, ErrTagNotFound
+	}
+	return tag, nil
+}
+func (uc *tagUseCase) List(ctx context.Context, limit, offset int) ([]*entity.Tag, int64, error) {
 	if limit <= 0 || limit > 100 {
-		return nil, ErrInvalidLimit
+		return nil, 0, ErrInvalidLimit
 	}
 	if offset < 0 {
-		return nil, ErrInvalidOffset
+		return nil, 0, ErrInvalidOffset
 	}
 	return uc.tagRepo.List(ctx, limit, offset)
 }

@@ -12,7 +12,7 @@ type TagRepository interface {
 	GetBySlug(ctx context.Context, slug string) (*entity.Tag, error)
 	Create(ctx context.Context, tag *entity.Tag) (int64, error)
 	ListAll(ctx context.Context) ([]*entity.Tag, error)
-	List(ctx context.Context, limit, offset int) ([]*entity.Tag, error)
+	List(ctx context.Context, limit, offset int) ([]*entity.Tag, int64, error)
 	ListByPostID(ctx context.Context, postID int64) ([]*entity.Tag, error)
 	AddToPost(ctx context.Context, postID int64, tagID int64) error
 	RemoveFromPost(ctx context.Context, postID int64, tagID int64) error

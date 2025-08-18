@@ -20,7 +20,7 @@ func NewTagRepo(db *sql.DB) *TagRepo {
 func (r *TagRepo) GetByID(ctx context.Context, id int64) (*entity.Tag, error) {
 	tag := &entity.Tag{}
 	err := r.db.QueryRowContext(ctx, "SELECT id, title, slug FROM tags WHERE id = $1", id).
-		Scan(&tag.ID, &tag.Title, &tag.Slug)
+		Scan(&tag.ID, &tag.Name, &tag.Slug)
 	if err != nil {
 		return nil, err
 	}
@@ -30,33 +30,35 @@ func (r *TagRepo) GetByID(ctx context.Context, id int64) (*entity.Tag, error) {
 func (r *TagRepo) GetBySlug(ctx context.Context, slug string) (*entity.Tag, error) {
 	tag := &entity.Tag{}
 	err := r.db.QueryRowContext(ctx, "SELECT id, title, slug FROM tags WHERE slug = $1", slug).
-		Scan(&tag.ID, &tag.Title, &tag.Slug)
+		Scan(&tag.ID, &tag.Name, &tag.Slug)
 	if err != nil {
 		return nil, err
 	}
 	return tag, nil
 }
 
-func (r *TagRepo) List(ctx context.Context, limit, offset int) ([]*entity.Tag, error) {
-	rows, err := r.db.QueryContext(ctx, `
-        SELECT id, title, slug 
-        FROM tags 
-        LIMIT $1 OFFSET $2`,
-		limit, offset)
+func (r *TagRepo) List(ctx context.Context, limit, offset int) ([]*entity.Tag, int64, error) {
+	const q = `SELECT id, name, slug FROM tags ORDER BY name LIMIT $1 OFFSET $2`
+	rows, err := r.db.QueryContext(ctx, q, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, fmt.Errorf("failed to list tags: %w", err)
 	}
 	defer rows.Close()
 
 	var tags []*entity.Tag
 	for rows.Next() {
-		var t entity.Tag
-		if err := rows.Scan(&t.ID, &t.Title, &t.Slug); err != nil {
-			return nil, err
+		t := new(entity.Tag)
+		if err := rows.Scan(&t.ID, &t.Name, &t.Slug); err != nil {
+			return nil, 0, err
 		}
-		tags = append(tags, &t)
+		tags = append(tags, t)
 	}
-	return tags, nil
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tags`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count tags: %w", err)
+	}
+	return tags, total, nil
 }
 
 func (r *TagRepo) ListByPostID(ctx context.Context, postID int64) ([]*entity.Tag, error) {
@@ -73,7 +75,7 @@ func (r *TagRepo) ListByPostID(ctx context.Context, postID int64) ([]*entity.Tag
 	var tags []*entity.Tag
 	for rows.Next() {
 		var t entity.Tag
-		if err := rows.Scan(&t.ID, &t.Title, &t.Slug); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Slug); err != nil {
 			return nil, err
 		}
 		tags = append(tags, &t)
@@ -103,7 +105,7 @@ func (r *TagRepo) ListByIDs(ctx context.Context, ids []int64) ([]*entity.Tag, er
 	var tags []*entity.Tag
 	for rows.Next() {
 		tag := &entity.Tag{}
-		if err := rows.Scan(&tag.ID, &tag.Title, &tag.Slug); err != nil {
+		if err := rows.Scan(&tag.ID, &tag.Name, &tag.Slug); err != nil {
 			return nil, err
 		}
 		tags = append(tags, tag)
@@ -113,10 +115,10 @@ func (r *TagRepo) ListByIDs(ctx context.Context, ids []int64) ([]*entity.Tag, er
 
 func (r *TagRepo) Create(ctx context.Context, tag *entity.Tag) (int64, error) {
 	err := r.db.QueryRowContext(ctx,
-		"INSERT INTO tags (title, slug) VALUES ($1, $2) RETURNING id",
-		tag.Title, tag.Slug).Scan(&tag.ID)
+		"INSERT INTO tags (name, slug) VALUES ($1, $2) RETURNING id",
+		tag.Name, tag.Slug).Scan(&tag.ID)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to create tag: %w", err)
 	}
 	return tag.ID, nil
 }
@@ -131,7 +133,7 @@ func (r *TagRepo) ListAll(ctx context.Context) ([]*entity.Tag, error) {
 	var tags []*entity.Tag
 	for rows.Next() {
 		tag := &entity.Tag{}
-		if err := rows.Scan(&tag.ID, &tag.Title, &tag.Slug); err != nil {
+		if err := rows.Scan(&tag.ID, &tag.Name, &tag.Slug); err != nil {
 			return nil, err
 		}
 		tags = append(tags, tag)

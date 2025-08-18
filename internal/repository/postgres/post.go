@@ -139,25 +139,46 @@ func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit i
 	return posts, nil
 }
 
-func (r *postRepository) List(ctx context.Context, limit, offset int) ([]*entity.Post, error) {
-	query := `SELECT id, topic_id, title, content, author_id, created_at 
-              FROM posts 
-              ORDER BY created_at DESC
-              LIMIT $1 OFFSET $2`
+func (r *postRepository) List(ctx context.Context, topicID, tagID int64, limit, offset int) ([]*entity.Post, int64, error) {
+	query := `SELECT id, title, content, author_id, topic_id, created_at, updated_at 
+              FROM posts WHERE 1=1`
+	args := []interface{}{}
+	idx := 1
 
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+	if topicID > 0 {
+		query += fmt.Sprintf(" AND topic_id = $%d", idx)
+		args = append(args, topicID)
+		idx++
+	}
+	if tagID > 0 {
+		query += fmt.Sprintf(" AND id IN (SELECT post_id FROM post_tags WHERE tag_id = $%d)", idx)
+		args = append(args, tagID)
+		idx++
+	}
+
+	countQuery := "SELECT COUNT(*) FROM (" + query + ") AS count_subquery"
+	var total int64
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts: %w", err)
+	}
+
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", idx, idx+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list posts: %w", err)
+		return nil, 0, fmt.Errorf("failed to list posts: %w", err)
 	}
 	defer rows.Close()
 
 	var posts []*entity.Post
 	for rows.Next() {
-		var p entity.Post
-		if err := rows.Scan(&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan post: %w", err)
+		p := new(entity.Post)
+		if err := rows.Scan(&p.ID, &p.Title, &p.Content, &p.AuthorID, &p.TopicID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, 0, err
 		}
-		posts = append(posts, &p)
+		posts = append(posts, p)
 	}
-	return posts, nil
+
+	return posts, total, nil
 }

@@ -70,7 +70,7 @@ func main() {
 	}
 	grpcServer := grpc.NewServer()
 
-	ssov1.RegisterForumServer(grpcServer, forumHandler)
+	ssov1.RegisterForumServiceServer(grpcServer, forumHandler)
 
 	logger.Info("forum-service is listening", slog.String("addr", addr))
 	if err := grpcServer.Serve(lis); err != nil {
