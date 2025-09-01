@@ -36,7 +36,7 @@ func (uc *commentUseCase) CreateComment(ctx context.Context, comment *entity.Com
 		return 0, ErrPostNotFound
 	}
 
-	comment.CreatedAt = time.Now().Unix()
+	comment.CreatedAt = time.Now().UTC()
 
 	id, err := uc.commentRepo.Create(ctx, comment)
 	if err != nil {

@@ -7,13 +7,14 @@ import (
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
+	forumv1 "github.com/VaneZ444/golang-forum-protos/gen/go/forum"
 )
 
 type TopicUseCase interface {
 	CreateTopic(ctx context.Context, topic *entity.Topic, post *entity.Post) (int64, int64, error)
 	GetByID(ctx context.Context, id int64) (*entity.Topic, *entity.Post, error)
-	List(ctx context.Context, categoryID int64, limit, offset int) ([]*entity.Topic, int64, error)
-	UpdateTopic(ctx context.Context, topic *entity.Topic) error
+	List(ctx context.Context, categoryID *int64, limit, offset int, sorting *forumv1.Sorting) ([]*entity.Topic, int64, error)
+	UpdateTopic(ctx context.Context, topic *entity.Topic) (*entity.Topic, error)
 	DeleteTopic(ctx context.Context, id int64) error
 }
 
@@ -47,7 +48,7 @@ func (uc *topicUseCase) CreateTopic(ctx context.Context, topic *entity.Topic, po
 	}
 
 	// Set timestamps
-	now := time.Now().UnixMilli()
+	now := time.Now().UTC()
 	topic.CreatedAt = now
 	post.CreatedAt = now
 
@@ -79,7 +80,12 @@ func (uc *topicUseCase) GetByID(ctx context.Context, id int64) (*entity.Topic, *
 	return topic, post, nil
 }
 
-func (uc *topicUseCase) List(ctx context.Context, categoryID int64, limit, offset int) ([]*entity.Topic, int64, error) {
+func (uc *topicUseCase) List(
+	ctx context.Context,
+	categoryID *int64,
+	limit, offset int,
+	sorting *forumv1.Sorting,
+) ([]*entity.Topic, int64, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -87,35 +93,40 @@ func (uc *topicUseCase) List(ctx context.Context, categoryID int64, limit, offse
 		offset = 0
 	}
 
-	// Validate category exists if specified
-	if categoryID != 0 {
-		_, err := uc.categoryRepo.GetByID(ctx, categoryID)
+	// Проверяем категорию, если указана
+	if categoryID != nil {
+		_, err := uc.categoryRepo.GetByID(ctx, *categoryID)
 		if err != nil {
 			uc.logger.Warn("category not found",
-				slog.Int64("category_id", categoryID),
+				slog.Int64("category_id", *categoryID),
 				slog.String("error", err.Error()),
 			)
 			return nil, 0, ErrCategoryNotFound
 		}
 	}
 
-	return uc.topicRepo.List(ctx, categoryID, limit, offset)
+	// Передаем сортировку дальше в репозиторий
+	return uc.topicRepo.List(ctx, categoryID, limit, offset, sorting)
 }
 
-func (uc *topicUseCase) UpdateTopic(ctx context.Context, topic *entity.Topic) error {
-	// Get existing topic to validate
-	existing, _, err := uc.topicRepo.GetByIDWithFirstPost(ctx, topic.ID)
+func (uc *topicUseCase) UpdateTopic(ctx context.Context, topic *entity.Topic) (*entity.Topic, error) {
+	existing, err := uc.topicRepo.GetByID(ctx, topic.ID)
 	if err != nil {
 		if err == repository.ErrNotFound {
-			uc.logger.Warn("topic not found for update", slog.Int64("id", topic.ID))
-			return ErrTopicNotFound
+			return nil, ErrTopicNotFound
 		}
-		return err
+		return nil, err
 	}
 
-	// Preserve immutable fields
-	topic.CreatedAt = existing.CreatedAt
+	// Preserve неизменяемые поля
 	topic.AuthorID = existing.AuthorID
+	topic.CreatedAt = existing.CreatedAt
+	topic.Status = existing.Status
+	topic.PostsCount = existing.PostsCount
+	topic.ViewsCount = existing.ViewsCount
+
+	// Обновляем last_activity
+	topic.LastActivity = time.Now().UTC()
 
 	return uc.topicRepo.Update(ctx, topic)
 }

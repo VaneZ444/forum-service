@@ -48,7 +48,7 @@ func (r *commentRepository) ListByPost(ctx context.Context, postID int64, limit,
 		return nil, 0, fmt.Errorf("failed to count comments: %w", err)
 	}
 
-	const q = `SELECT id, post_id, content, author_id, created_at, updated_at
+	const q = `SELECT id, post_id, content, author_id, created_at
                FROM comments WHERE post_id = $1
                ORDER BY created_at ASC
                LIMIT $2 OFFSET $3`
@@ -61,7 +61,7 @@ func (r *commentRepository) ListByPost(ctx context.Context, postID int64, limit,
 	var items []*entity.Comment
 	for rows.Next() {
 		c := new(entity.Comment)
-		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, c)

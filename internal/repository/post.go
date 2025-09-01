@@ -14,4 +14,5 @@ type PostRepository interface {
 	Update(ctx context.Context, post *entity.Post) error
 	Delete(ctx context.Context, id int64) error
 	ListByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, error)
+	AddView(ctx context.Context, postID, userID int64) error
 }

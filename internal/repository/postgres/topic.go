@@ -3,11 +3,12 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"time"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
+	forumv1 "github.com/VaneZ444/golang-forum-protos/gen/go/forum"
 )
 
 type TopicRepository struct {
@@ -27,8 +28,8 @@ func (r *TopicRepository) CreateWithPost(ctx context.Context, topic *entity.Topi
 
 	// Insert topic
 	topicQuery := `
-		INSERT INTO topics (title, author_id, category_id, created_at, posts_count, last_activity)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO topics (title, author_id, category_id, created_at, last_activity)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
 	`
 	err = tx.QueryRowContext(ctx, topicQuery,
@@ -36,8 +37,7 @@ func (r *TopicRepository) CreateWithPost(ctx context.Context, topic *entity.Topi
 		topic.AuthorID,
 		topic.CategoryID,
 		topic.CreatedAt,
-		1,               // Initial posts_count
-		topic.CreatedAt, // Last activity same as creation time
+		topic.CreatedAt,
 	).Scan(&topic.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create topic: %w", err)
@@ -61,19 +61,9 @@ func (r *TopicRepository) CreateWithPost(ctx context.Context, topic *entity.Topi
 		return fmt.Errorf("failed to create first post: %w", err)
 	}
 
-	// Update category topic count
-	updateCategoryQuery := `
-		UPDATE categories 
-		SET topics_count = topics_count + 1 
-		WHERE id = $1
-	`
-	_, err = tx.ExecContext(ctx, updateCategoryQuery, topic.CategoryID)
-	if err != nil {
-		return fmt.Errorf("failed to update category topic count: %w", err)
-	}
-
 	return tx.Commit()
 }
+
 func (r *TopicRepository) GetByID(ctx context.Context, id int64) (*entity.Topic, error) {
 	query := `
 		SELECT 
@@ -136,17 +126,29 @@ func (r *TopicRepository) GetByIDWithFirstPost(ctx context.Context, id int64) (*
 	return topic, post, nil
 }
 
-func (r *TopicRepository) List(ctx context.Context, categoryID int64, limit, offset int) ([]*entity.Topic, int64, error) {
+func (r *TopicRepository) List(ctx context.Context, categoryID *int64, limit, offset int, sorting *forumv1.Sorting) ([]*entity.Topic, int64, error) {
 	query := `
 		SELECT id, title, author_id, category_id, created_at, 
 		       posts_count, views_count, last_activity, status
 		FROM topics
-		WHERE category_id = $1
-		ORDER BY last_activity DESC
-		LIMIT $2 OFFSET $3
 	`
+	countQuery := `SELECT COUNT(*) FROM topics`
 
-	rows, err := r.db.QueryContext(ctx, query, categoryID, limit, offset)
+	var args []any
+	argIndex := 1
+
+	if categoryID != nil {
+		query += fmt.Sprintf(" WHERE category_id = $%d", argIndex)
+		countQuery += fmt.Sprintf(" WHERE category_id = $%d", argIndex)
+		args = append(args, *categoryID)
+		argIndex++
+	}
+
+	orderBy := buildOrderBy(sorting)
+	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", orderBy, argIndex, argIndex+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list topics: %w", err)
 	}
@@ -155,20 +157,17 @@ func (r *TopicRepository) List(ctx context.Context, categoryID int64, limit, off
 	topics := []*entity.Topic{}
 	for rows.Next() {
 		t := &entity.Topic{}
-		err := rows.Scan(
+		if err := rows.Scan(
 			&t.ID, &t.Title, &t.AuthorID, &t.CategoryID, &t.CreatedAt,
 			&t.PostsCount, &t.ViewsCount, &t.LastActivity, &t.Status,
-		)
-		if err != nil {
+		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan topic: %w", err)
 		}
 		topics = append(topics, t)
 	}
 
-	// Get total count
-	countQuery := `SELECT COUNT(*) FROM topics WHERE category_id = $1`
 	var total int64
-	err = r.db.QueryRowContext(ctx, countQuery, categoryID).Scan(&total)
+	err = r.db.QueryRowContext(ctx, countQuery, args[:len(args)-2]...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get topic count: %w", err)
 	}
@@ -176,33 +175,40 @@ func (r *TopicRepository) List(ctx context.Context, categoryID int64, limit, off
 	return topics, total, nil
 }
 
-func (r *TopicRepository) Update(ctx context.Context, topic *entity.Topic) error {
-	query := `
-		UPDATE topics 
-		SET title = $1, category_id = $2, updated_at = $3
+func (r *TopicRepository) Update(ctx context.Context, topic *entity.Topic) (*entity.Topic, error) {
+	const query = `
+		UPDATE topics
+		SET title = $1, category_id = $2, last_activity = $3
 		WHERE id = $4
+		RETURNING id, title, author_id, category_id, created_at, status, posts_count, views_count, last_activity
 	`
 
-	result, err := r.db.ExecContext(ctx, query,
+	updatedTopic := &entity.Topic{}
+	err := r.db.QueryRowContext(ctx, query,
 		topic.Title,
 		topic.CategoryID,
-		time.Now().UnixMilli(),
+		topic.LastActivity,
 		topic.ID,
+	).Scan(
+		&updatedTopic.ID,
+		&updatedTopic.Title,
+		&updatedTopic.AuthorID,
+		&updatedTopic.CategoryID,
+		&updatedTopic.CreatedAt,
+		&updatedTopic.Status,
+		&updatedTopic.PostsCount,
+		&updatedTopic.ViewsCount,
+		&updatedTopic.LastActivity,
 	)
+
 	if err != nil {
-		return fmt.Errorf("failed to update topic: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to update topic: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return repository.ErrNotFound
-	}
-
-	return nil
+	return updatedTopic, nil
 }
 
 func (r *TopicRepository) Delete(ctx context.Context, id int64) error {
@@ -250,4 +256,36 @@ func (r *TopicRepository) Delete(ctx context.Context, id int64) error {
 	}
 
 	return tx.Commit()
+}
+
+func buildOrderBy(sorting *forumv1.Sorting) string {
+	if sorting == nil {
+		return "last_activity DESC" // дефолт
+	}
+
+	var field string
+	switch sorting.SortField {
+	case forumv1.SortField_SORT_FIELD_CREATED_AT:
+		field = "created_at"
+	case forumv1.SortField_SORT_FIELD_UPDATED_AT:
+		field = "updated_at"
+	case forumv1.SortField_SORT_FIELD_TITLE:
+		field = "title"
+	case forumv1.SortField_SORT_FIELD_POPULARITY:
+		field = "views_count" // можно по логике менять на posts_count
+	default:
+		field = "last_activity"
+	}
+
+	var order string
+	switch sorting.SortOrder {
+	case forumv1.SortOrder_SORT_ORDER_ASC:
+		order = "ASC"
+	case forumv1.SortOrder_SORT_ORDER_DESC:
+		order = "DESC"
+	default:
+		order = "DESC"
+	}
+
+	return fmt.Sprintf("%s %s", field, order)
 }

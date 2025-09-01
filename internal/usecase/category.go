@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -11,10 +12,11 @@ import (
 )
 
 type CategoryUseCase interface {
-	CreateCategory(ctx context.Context, category *entity.Category) error
+	CreateCategory(ctx context.Context, category *entity.Category) (*entity.Category, error)
 	GetByID(ctx context.Context, id int64) (*entity.Category, error)
+	GetBySlug(ctx context.Context, slug string) (*entity.Category, error)
 	List(ctx context.Context, limit, offset int) ([]*entity.Category, int64, error)
-	UpdateCategory(ctx context.Context, category *entity.Category) error
+	UpdateCategory(ctx context.Context, category *entity.Category) (*entity.Category, error)
 	DeleteCategory(ctx context.Context, id int64) error
 }
 
@@ -30,7 +32,7 @@ func NewCategoryUseCase(categoryRepo repository.CategoryRepository, logger *slog
 	}
 }
 
-func (uc *categoryUseCase) CreateCategory(ctx context.Context, category *entity.Category) error {
+func (uc *categoryUseCase) CreateCategory(ctx context.Context, category *entity.Category) (*entity.Category, error) {
 	// Generate slug if not provided
 	if category.Slug == "" {
 		category.Slug = slug.Make(category.Title)
@@ -40,11 +42,11 @@ func (uc *categoryUseCase) CreateCategory(ctx context.Context, category *entity.
 	existing, err := uc.categoryRepo.GetBySlug(ctx, category.Slug)
 	if err == nil && existing != nil {
 		uc.logger.Warn("category already exists", slog.String("slug", category.Slug))
-		return ErrCategoryAlreadyExists
+		return nil, ErrCategoryAlreadyExists
 	}
 
 	// Set timestamps
-	now := time.Now().UnixMilli()
+	now := time.Now().UTC()
 	category.CreatedAt = now
 	category.UpdatedAt = now
 
@@ -61,7 +63,16 @@ func (uc *categoryUseCase) GetByID(ctx context.Context, id int64) (*entity.Categ
 	}
 	return category, nil
 }
-
+func (uc *categoryUseCase) GetBySlug(ctx context.Context, slug string) (*entity.Category, error) {
+	category, err := uc.categoryRepo.GetBySlug(ctx, slug)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrCategoryNotFound
+		}
+		return nil, err
+	}
+	return category, nil
+}
 func (uc *categoryUseCase) List(ctx context.Context, limit, offset int) ([]*entity.Category, int64, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
@@ -83,18 +94,18 @@ func (uc *categoryUseCase) List(ctx context.Context, limit, offset int) ([]*enti
 	return categories, total, nil
 }
 
-func (uc *categoryUseCase) UpdateCategory(ctx context.Context, category *entity.Category) error {
+func (uc *categoryUseCase) UpdateCategory(ctx context.Context, category *entity.Category) (*entity.Category, error) {
 	existing, err := uc.categoryRepo.GetByID(ctx, category.ID)
 	if err != nil {
 		if err == repository.ErrNotFound {
-			return ErrCategoryNotFound
+			return nil, ErrCategoryNotFound
 		}
-		return err
+		return nil, err
 	}
 
 	// Preserve created_at
 	category.CreatedAt = existing.CreatedAt
-	category.UpdatedAt = time.Now().UnixMilli()
+	category.UpdatedAt = time.Now().UTC()
 
 	return uc.categoryRepo.Update(ctx, category)
 }

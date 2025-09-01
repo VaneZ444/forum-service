@@ -2,11 +2,18 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/usecase"
 	forumv1 "github.com/VaneZ444/golang-forum-protos/gen/go/forum"
+	"github.com/gosimple/slug"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ForumHandler struct {
@@ -45,12 +52,12 @@ func (h *ForumHandler) CreateCategory(ctx context.Context, req *forumv1.CreateCa
 		Description: req.GetDescription(),
 	}
 
-	err := h.categoryUC.CreateCategory(ctx, category)
+	createdCategory, err := h.categoryUC.CreateCategory(ctx, category)
 	if err != nil {
 		h.logger.Error("failed to create category", "error", err)
 		return nil, err
 	}
-	return &forumv1.CategoryResponse{Category: toProtoCategory(category)}, nil
+	return &forumv1.CategoryResponse{Category: toProtoCategory(createdCategory)}, nil
 }
 
 func (h *ForumHandler) GetCategory(ctx context.Context, req *forumv1.GetCategoryRequest) (*forumv1.CategoryResponse, error) {
@@ -89,8 +96,59 @@ func (h *ForumHandler) ListCategories(ctx context.Context, req *forumv1.ListCate
 }
 
 func (h *ForumHandler) UpdateCategory(ctx context.Context, req *forumv1.UpdateCategoryRequest) (*forumv1.CategoryResponse, error) {
-	// Implementation will be similar to CreateCategory
-	return nil, nil
+	h.logger.Info("updating category", "id", req.GetId())
+
+	// 1) Берём текущую версию
+	existing, err := h.categoryUC.GetByID(ctx, req.GetId())
+	if err != nil {
+		h.logger.Error("get category failed", "error", err)
+		return nil, err
+	}
+
+	// 2) Мержим изменения из запроса
+	title := existing.Title
+	if req.Title != nil {
+		t := strings.TrimSpace(req.GetTitle())
+		if t == "" {
+			return nil, status.Error(codes.InvalidArgument, "title cannot be empty")
+		}
+		title = t
+	}
+
+	description := existing.Description
+	if req.Description != nil {
+		description = req.GetDescription()
+	}
+
+	// 3) Генерируем новый slug, если title поменялся
+	newSlug := existing.Slug
+	if title != existing.Title {
+		newSlug = slug.Make(title)
+
+		// Проверяем уникальность
+		if other, _ := h.categoryUC.GetBySlug(ctx, newSlug); other != nil && other.ID != existing.ID {
+			return nil, status.Errorf(codes.AlreadyExists, "slug %s already exists", newSlug)
+		}
+	}
+
+	// 4) Собираем сущность для апдейта
+	cat := &entity.Category{
+		ID:          existing.ID,
+		Title:       title,
+		Slug:        newSlug,
+		Description: description,
+		CreatedAt:   existing.CreatedAt,
+		UpdatedAt:   time.Now().UTC(),
+	}
+
+	// 5) Апдейт
+	updated, err := h.categoryUC.UpdateCategory(ctx, cat)
+	if err != nil {
+		h.logger.Error("update category failed", "error", err)
+		return nil, err
+	}
+
+	return &forumv1.CategoryResponse{Category: toProtoCategory(updated)}, nil
 }
 
 func (h *ForumHandler) DeleteCategory(ctx context.Context, req *forumv1.DeleteCategoryRequest) (*forumv1.Empty, error) {
@@ -149,26 +207,84 @@ func (h *ForumHandler) GetTopic(ctx context.Context, req *forumv1.GetTopicReques
 	}, nil
 }
 
-func (h *ForumHandler) ListTopics(ctx context.Context, req *forumv1.ListTopicsRequest) (*forumv1.ListTopicsResponse, error) {
-	var categoryID int64
+func (h *ForumHandler) UpdateTopic(ctx context.Context, req *forumv1.UpdateTopicRequest) (*forumv1.TopicResponse, error) {
+	h.logger.Info("updating topic", "id", req.GetId())
+
+	// 1) Берём текущий топик
+	existing, _, err := h.topicUC.GetByID(ctx, req.GetId())
+	if err != nil {
+		h.logger.Error("get topic failed", "error", err)
+		return nil, err
+	}
+
+	// 2) Мержим изменения
+	title := existing.Title
+	if req.Title != nil {
+		t := strings.TrimSpace(req.GetTitle())
+		if t == "" {
+			return nil, status.Error(codes.InvalidArgument, "title cannot be empty")
+		}
+		title = t
+	}
+
+	categoryID := existing.CategoryID
 	if req.CategoryId != nil {
 		categoryID = req.GetCategoryId()
 	}
 
-	pagination := req.GetPagination()
-	limit := 50
-	offset := 0
-	if pagination != nil {
-		limit = int(pagination.GetLimit())
-		offset = int(pagination.GetOffset())
+	// 3) Собираем обновлённую сущность
+	topic := &entity.Topic{
+		ID:           existing.ID,
+		Title:        title,
+		CategoryID:   categoryID,
+		AuthorID:     existing.AuthorID,
+		CreatedAt:    existing.CreatedAt,
+		Status:       existing.Status,
+		PostsCount:   existing.PostsCount,
+		ViewsCount:   existing.ViewsCount,
+		LastActivity: time.Now().UTC(), // обновляем активность
 	}
 
-	topics, total, err := h.topicUC.List(ctx, categoryID, limit, offset)
+	// 4) Апдейт
+	updated, err := h.topicUC.UpdateTopic(ctx, topic)
+	if err != nil {
+		h.logger.Error("update topic failed", "error", err)
+		return nil, err
+	}
+
+	return &forumv1.TopicResponse{
+		Topic:     toProtoTopic(updated),
+		FirstPost: nil, // посты не трогаем
+	}, nil
+}
+
+func (h *ForumHandler) ListTopics(ctx context.Context, req *forumv1.ListTopicsRequest) (*forumv1.ListTopicsResponse, error) {
+	var categoryID *int64
+	if req.CategoryId != nil {
+		id := req.GetCategoryId()
+		categoryID = &id
+	}
+
+	// Пагинация
+	limit := 50
+	offset := 0
+	if req.Pagination != nil {
+		if req.Pagination.Limit > 0 {
+			limit = int(req.Pagination.Limit)
+		}
+		if req.Pagination.Offset > 0 {
+			offset = int(req.Pagination.Offset)
+		}
+	}
+
+	// Вызываем юзкейс
+	topics, total, err := h.topicUC.List(ctx, categoryID, limit, offset, req.GetSorting())
 	if err != nil {
 		h.logger.Error("failed to list topics", "error", err)
 		return nil, err
 	}
 
+	// Конвертируем в proto
 	protoTopics := make([]*forumv1.Topic, len(topics))
 	for i, t := range topics {
 		protoTopics[i] = toProtoTopic(t)
@@ -178,6 +294,21 @@ func (h *ForumHandler) ListTopics(ctx context.Context, req *forumv1.ListTopicsRe
 		Topics:     protoTopics,
 		TotalCount: total,
 	}, nil
+}
+
+func (h *ForumHandler) DeleteTopic(ctx context.Context, req *forumv1.DeleteTopicRequest) (*forumv1.Empty, error) {
+	h.logger.Info("deleting topic", "id", req.GetId())
+
+	err := h.topicUC.DeleteTopic(ctx, req.GetId())
+	if err != nil {
+		if errors.Is(err, usecase.ErrTopicNotFound) {
+			return nil, status.Error(codes.NotFound, "topic not found")
+		}
+		h.logger.Error("failed to delete topic", "error", err)
+		return nil, status.Error(codes.Internal, "failed to delete topic")
+	}
+
+	return &forumv1.Empty{}, nil
 }
 
 // ================== Post Handlers ==================
@@ -214,6 +345,10 @@ func (h *ForumHandler) GetPost(ctx context.Context, req *forumv1.GetPostRequest)
 	if err != nil {
 		h.logger.Error("failed to get post", "error", err)
 		return nil, err
+	}
+	userID := ctx.
+	if err := h.postUC.AddView(ctx, req.GetId(), userID); err != nil {
+		h.logger.Warn("failed to add post view", "error", err)
 	}
 	return &forumv1.PostResponse{Post: toProtoPost(post)}, nil
 }
@@ -252,6 +387,32 @@ func (h *ForumHandler) ListPosts(ctx context.Context, req *forumv1.ListPostsRequ
 		Posts:      protoPosts,
 		TotalCount: total,
 	}, nil
+}
+
+func (h *ForumHandler) UpdatePost(ctx context.Context, req *forumv1.UpdatePostRequest) (*forumv1.PostResponse, error) {
+	h.logger.Info("updating post", "id", req.GetId())
+
+	post, err := h.postUC.UpdatePost(ctx, req)
+	if err != nil {
+		if errors.Is(err, usecase.ErrPostNotFound) {
+			return nil, status.Error(codes.NotFound, "post not found")
+		}
+		return nil, status.Error(codes.Internal, "failed to update post")
+	}
+
+	return &forumv1.PostResponse{Post: toProtoPost(post)}, nil
+}
+
+func (h *ForumHandler) DeletePost(ctx context.Context, req *forumv1.DeletePostRequest) (*forumv1.Empty, error) {
+	h.logger.Info("deleting post", "id", req.GetId())
+
+	err := h.postUC.DeletePost(ctx, req.GetId())
+	if err != nil {
+		h.logger.Error("failed to delete post", "error", err)
+		return nil, err
+	}
+
+	return &forumv1.Empty{}, nil
 }
 
 // ================== Comment Handlers ==================
@@ -379,8 +540,8 @@ func toProtoCategory(c *entity.Category) *forumv1.Category {
 		Title:       c.Title,
 		Slug:        c.Slug,
 		Description: c.Description,
-		CreatedAt:   c.CreatedAt,
-		UpdatedAt:   c.UpdatedAt,
+		CreatedAt:   timestamppb.New(c.CreatedAt),
+		UpdatedAt:   timestamppb.New(c.UpdatedAt),
 	}
 }
 
@@ -390,11 +551,11 @@ func toProtoTopic(t *entity.Topic) *forumv1.Topic {
 		Title:        t.Title,
 		AuthorId:     t.AuthorID,
 		CategoryId:   t.CategoryID,
-		CreatedAt:    t.CreatedAt,
+		CreatedAt:    timestamppb.New(t.CreatedAt),
 		Status:       forumv1.Status(t.Status),
 		PostsCount:   t.PostsCount,
 		ViewsCount:   t.ViewsCount,
-		LastActivity: t.LastActivity,
+		LastActivity: timestamppb.New(t.LastActivity),
 	}
 }
 
@@ -412,8 +573,8 @@ func toProtoPost(p *entity.Post) *forumv1.Post {
 		Content:       p.Content,
 		Images:        p.Images,
 		Tags:          tags,
-		CreatedAt:     p.CreatedAt,
-		UpdatedAt:     p.UpdatedAt,
+		CreatedAt:     timestamppb.New(p.CreatedAt),
+		UpdatedAt:     timestamppb.New(p.UpdatedAt),
 		Status:        forumv1.Status(p.Status),
 		ViewsCount:    p.ViewsCount,
 		CommentsCount: p.CommentsCount,
@@ -427,8 +588,8 @@ func toProtoComment(c *entity.Comment) *forumv1.Comment {
 		PostId:    c.PostID,
 		AuthorId:  c.AuthorID,
 		Content:   c.Content,
-		CreatedAt: c.CreatedAt,
-		UpdatedAt: c.UpdatedAt,
+		CreatedAt: timestamppb.New(c.CreatedAt),
+		UpdatedAt: timestamppb.New(c.UpdatedAt),
 	}
 }
 

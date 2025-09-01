@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
@@ -18,10 +19,20 @@ func NewPostRepository(db *sql.DB) repository.PostRepository {
 }
 
 func (r *postRepository) Create(ctx context.Context, post *entity.Post) (int64, error) {
-	const query = `INSERT INTO posts (topic_id, content, author_id, created_at) 
-				   VALUES ($1, $2, $3, $4) RETURNING id`
+	const query = `
+	INSERT INTO posts (topic_id, title, content, author_id, created_at) 
+	VALUES ($1, $2, $3, $4, $5) 
+	RETURNING id
+	`
 
-	err := r.db.QueryRowContext(ctx, query, post.TopicID, post.Content, post.AuthorID, post.CreatedAt).Scan(&post.ID)
+	err := r.db.QueryRowContext(ctx, query,
+		post.TopicID,
+		post.Title,
+		post.Content,
+		post.AuthorID,
+		post.CreatedAt,
+	).Scan(&post.ID)
+
 	if err != nil {
 		return 0, fmt.Errorf("failed to create post: %w", err)
 	}
@@ -46,22 +57,54 @@ func (r *postRepository) GetByID(ctx context.Context, id int64) (*entity.Post, e
 }
 
 func (r *postRepository) Update(ctx context.Context, post *entity.Post) error {
-	query := `UPDATE posts 
-              SET title = $1, content = $2
-              WHERE id = $3`
-
-	result, err := r.db.ExecContext(ctx, query, post.Title, post.Content, post.ID)
+	// Обновляем пост
+	query := `
+		UPDATE posts
+		SET title = $1, content = $2, updated_at = $3
+		WHERE id = $4
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		post.Title,
+		post.Content,
+		time.Now().UTC(),
+		post.ID,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to update post: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
+	// Обновляем связи с тегами (полная замена)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		return fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Удаляем старые теги
+	_, err = tx.ExecContext(ctx, "DELETE FROM post_tags WHERE post_id = $1", post.ID)
+	if err != nil {
+		return fmt.Errorf("failed to delete old tags: %w", err)
 	}
 
-	if rowsAffected == 0 {
-		return fmt.Errorf("post not found with id: %d", post.ID)
+	// Вставляем новые
+	if len(post.Tags) > 0 {
+		stmt := "INSERT INTO post_tags (post_id, tag_id) VALUES "
+		vals := []any{}
+		for i, t := range post.Tags {
+			if i > 0 {
+				stmt += ", "
+			}
+			stmt += fmt.Sprintf("($%d, $%d)", i*2+1, i*2+2)
+			vals = append(vals, post.ID, t.ID)
+		}
+		_, err = tx.ExecContext(ctx, stmt, vals...)
+		if err != nil {
+			return fmt.Errorf("failed to insert new tags: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit tx: %w", err)
 	}
 
 	return nil
@@ -138,7 +181,17 @@ func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit i
 
 	return posts, nil
 }
+func (r *postRepository) AddView(ctx context.Context, postID, userID int64) error {
+	query := `INSERT INTO post_views (post_id, user_id)
+	 		VALUES ($1, $2)
+			ON CONFLICT (post_id, user_id) DO NOTHING`
 
+	_, err := r.db.ExecContext(ctx, query, postID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to add view: %w", err)
+	}
+	return nil
+}
 func (r *postRepository) List(ctx context.Context, topicID, tagID int64, limit, offset int) ([]*entity.Post, int64, error) {
 	query := `SELECT id, title, content, author_id, topic_id, created_at, updated_at 
               FROM posts WHERE 1=1`

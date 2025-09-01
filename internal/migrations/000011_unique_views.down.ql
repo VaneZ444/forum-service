@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_post_views_unique;

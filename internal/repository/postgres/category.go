@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
@@ -17,25 +18,29 @@ func NewCategoryRepository(db *sql.DB) repository.CategoryRepository {
 	return &categoryRepository{db: db}
 }
 
-func (r *categoryRepository) Create(ctx context.Context, category *entity.Category) error {
+func (r *categoryRepository) Create(ctx context.Context, category *entity.Category) (*entity.Category, error) {
 	const query = `
-		INSERT INTO categories (title, slug, description, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id
-	`
-
+        INSERT INTO categories (title, slug, description)
+        VALUES ($1, $2, $3)
+        RETURNING id, title, slug, description, created_at, updated_at
+    `
+	newCategory := &entity.Category{}
 	err := r.db.QueryRowContext(ctx, query,
 		category.Title,
 		category.Slug,
 		category.Description,
-		category.CreatedAt,
-		category.UpdatedAt,
-	).Scan(&category.ID)
-
+	).Scan(
+		&newCategory.ID,
+		&newCategory.Title,
+		&newCategory.Slug,
+		&newCategory.Description,
+		&newCategory.CreatedAt,
+		&newCategory.UpdatedAt,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to create category: %w", err)
+		return nil, fmt.Errorf("failed to create category: %w", err)
 	}
-	return nil
+	return newCategory, nil
 }
 
 func (r *categoryRepository) GetByID(ctx context.Context, id int64) (*entity.Category, error) {
@@ -141,34 +146,38 @@ func (r *categoryRepository) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-func (r *categoryRepository) Update(ctx context.Context, category *entity.Category) error {
+func (r *categoryRepository) Update(ctx context.Context, category *entity.Category) (*entity.Category, error) {
 	const query = `
 		UPDATE categories 
 		SET title = $1, slug = $2, description = $3, updated_at = $4
 		WHERE id = $5
+		RETURNING id, title, slug, description, created_at, updated_at
 	`
 
-	result, err := r.db.ExecContext(ctx, query,
+	updatedCategory := &entity.Category{}
+	err := r.db.QueryRowContext(ctx, query,
 		category.Title,
 		category.Slug,
 		category.Description,
 		category.UpdatedAt,
 		category.ID,
+	).Scan(
+		&updatedCategory.ID,
+		&updatedCategory.Title,
+		&updatedCategory.Slug,
+		&updatedCategory.Description,
+		&updatedCategory.CreatedAt,
+		&updatedCategory.UpdatedAt,
 	)
+
 	if err != nil {
-		return fmt.Errorf("failed to update category: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to update category: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return repository.ErrNotFound
-	}
-
-	return nil
+	return updatedCategory, nil
 }
 
 func (r *categoryRepository) Delete(ctx context.Context, id int64) error {

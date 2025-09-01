@@ -3,9 +3,9 @@ CREATE TABLE topics (
     title VARCHAR(255) NOT NULL,
     category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
     author_id INTEGER NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     status INT DEFAULT 1,
     posts_count INT DEFAULT 0,
     views_count INT DEFAULT 0,
-    last_activity BIGINT;
+    last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

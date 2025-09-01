@@ -1,5 +1,7 @@
 package entity
 
+import "time"
+
 type Post struct {
 	ID            int64
 	TopicID       int64
@@ -8,8 +10,8 @@ type Post struct {
 	Content       string
 	Images        []string
 	Tags          []Tag
-	CreatedAt     int64
-	UpdatedAt     int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 	Status        Status
 	ViewsCount    int64
 	CommentsCount int64

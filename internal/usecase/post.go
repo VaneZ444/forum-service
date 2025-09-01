@@ -4,10 +4,14 @@ package usecase
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
+	forumv1 "github.com/VaneZ444/golang-forum-protos/gen/go/forum"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type PostUseCase interface {
@@ -15,9 +19,10 @@ type PostUseCase interface {
 	GetPostByID(ctx context.Context, id int64) (*entity.Post, error)
 	ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, error)
 	List(ctx context.Context, topicID, tagID int64, limit, offset int) ([]*entity.Post, int64, error)
-	UpdatePost(ctx context.Context, id int64, title, content string) (*entity.Post, error)
+	UpdatePost(ctx context.Context, req *forumv1.UpdatePostRequest) (*entity.Post, error)
 	DeletePost(ctx context.Context, id int64) error
 	ListPostsByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, error)
+	AddView(ctx context.Context, postID, userID int64) error
 }
 
 type postUseCase struct {
@@ -48,7 +53,7 @@ func (uc *postUseCase) CreatePost(ctx context.Context, post *entity.Post) (int64
 		return 0, ErrTopicNotFound
 	}
 
-	post.CreatedAt = time.Now().Unix()
+	post.CreatedAt = time.Now().UTC()
 
 	id, err := uc.postRepo.Create(ctx, post)
 	if err != nil {
@@ -58,7 +63,9 @@ func (uc *postUseCase) CreatePost(ctx context.Context, post *entity.Post) (int64
 
 	return id, nil
 }
-
+func (uc *postUseCase) AddView(ctx context.Context, postID, userID int64) error {
+	return uc.postRepo.AddView(ctx, postID, userID)
+}
 func (uc *postUseCase) GetPostByID(ctx context.Context, id int64) (*entity.Post, error) {
 	post, err := uc.postRepo.GetByID(ctx, id)
 	if err != nil {
@@ -93,15 +100,33 @@ func (uc *postUseCase) List(ctx context.Context, topicID, tagID int64, limit, of
 	return posts, total, nil
 }
 
-func (uc *postUseCase) UpdatePost(ctx context.Context, id int64, title, content string) (*entity.Post, error) {
-	post, err := uc.postRepo.GetByID(ctx, id)
+func (uc *postUseCase) UpdatePost(ctx context.Context, req *forumv1.UpdatePostRequest) (*entity.Post, error) {
+	post, err := uc.postRepo.GetByID(ctx, req.GetId())
 	if err != nil {
-		uc.logger.Warn("post not found for update", slog.Int64("id", id))
+		uc.logger.Warn("post not found", slog.Int64("id", req.GetId()))
 		return nil, ErrPostNotFound
 	}
 
-	post.Title = title
-	post.Content = content
+	// Мержим изменения
+	if req.Title != nil {
+		post.Title = strings.TrimSpace(req.GetTitle())
+		if post.Title == "" {
+			return nil, status.Error(codes.InvalidArgument, "title cannot be empty")
+		}
+	}
+	if req.Content != nil {
+		post.Content = req.GetContent()
+	}
+	if req.Images != nil {
+		post.Images = req.GetImages()
+	}
+	if req.TagIds != nil {
+		post.Tags = make([]entity.Tag, len(req.GetTagIds()))
+		for i, id := range req.GetTagIds() {
+			post.Tags[i] = entity.Tag{ID: id}
+		}
+	}
+
 	err = uc.postRepo.Update(ctx, post)
 	if err != nil {
 		uc.logger.Error("failed to update post", slog.String("err", err.Error()))
