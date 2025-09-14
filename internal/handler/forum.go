@@ -346,7 +346,7 @@ func (h *ForumHandler) GetPost(ctx context.Context, req *forumv1.GetPostRequest)
 		h.logger.Error("failed to get post", "error", err)
 		return nil, err
 	}
-	userID := ctx.
+	userID := GetUserIDFromCtx(ctx)
 	if err := h.postUC.AddView(ctx, req.GetId(), userID); err != nil {
 		h.logger.Warn("failed to add post view", "error", err)
 	}
