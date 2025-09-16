@@ -2,7 +2,7 @@ module github.com/VaneZ444/forum-service
 
 go 1.24.0
 
-require github.com/VaneZ444/golang-forum-protos v1.2.4
+require github.com/VaneZ444/golang-forum-protos v1.2.6
 
 require (
 	github.com/gosimple/unidecode v1.0.1 // indirect

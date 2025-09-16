@@ -27,6 +27,34 @@ func (r *commentRepository) Create(ctx context.Context, comment *entity.Comment)
 	return comment.ID, nil
 }
 
+func (r *commentRepository) Delete(ctx context.Context, commentID int64) error {
+	const query = `DELETE FROM comments WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, commentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete comment: %w", err)
+	}
+	return nil
+}
+
+func (r *commentRepository) Update(ctx context.Context, comment *entity.Comment) error {
+	const query = `
+        UPDATE comments
+        SET content = $1, updated_at = $2
+        WHERE id = $3
+    `
+	_, err := r.db.ExecContext(
+		ctx,
+		query,
+		comment.Content,
+		comment.UpdatedAt,
+		comment.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update comment: %w", err)
+	}
+	return nil
+}
+
 func (r *commentRepository) GetByID(ctx context.Context, id int64) (*entity.Comment, error) {
 	const query = `SELECT id, post_id, content, author_id, created_at FROM comments WHERE id = $1`
 

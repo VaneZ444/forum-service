@@ -23,9 +23,9 @@ rpc DeletePost(DeletePostRequest) returns (Empty); Работает
 // Comments
 rpc CreateComment(CreateCommentRequest) returns (CommentResponse); Работает
 rpc GetComment(GetCommentRequest) returns (CommentResponse); Работает
-rpc ListComments(ListCommentsRequest) returns (ListCommentsResponse); 
-rpc UpdateComment(UpdateCommentRequest) returns (CommentResponse);
-rpc DeleteComment(DeleteCommentRequest) returns (Empty);
+rpc ListComments(ListCommentsRequest) returns (ListCommentsResponse); может падать пагинация
+rpc UpdateComment(UpdateCommentRequest) returns (CommentResponse); он существует но проверить нечем
+rpc DeleteComment(DeleteCommentRequest) returns (Empty); он существует но проверить нечем
 
 // Tags
 rpc CreateTag(CreateTagRequest) returns (TagResponse);

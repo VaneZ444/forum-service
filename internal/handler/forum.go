@@ -469,6 +469,37 @@ func (h *ForumHandler) ListComments(ctx context.Context, req *forumv1.ListCommen
 		TotalCount: total,
 	}, nil
 }
+func (h *ForumHandler) UpdateComment(ctx context.Context, req *forumv1.UpdateCommentRequest) (*forumv1.CommentResponse, error) {
+	h.logger.Info("updating comment", "comment_id", req.GetId())
+
+	// Fetch the existing comment (assuming you have a GetComment method in your use case)
+	existingComment, err := h.commentUC.GetCommentByID(ctx, req.GetId())
+	if err != nil {
+		h.logger.Error("failed to fetch comment", "error", err)
+		return nil, err
+	}
+
+	// Update only the content
+	existingComment.Content = req.GetContent()
+
+	// Persist the update (assuming you have an UpdateComment method in your use case)
+	err = h.commentUC.UpdateComment(ctx, existingComment)
+	if err != nil {
+		h.logger.Error("failed to update comment", "error", err)
+		return nil, err
+	}
+
+	return &forumv1.CommentResponse{Comment: toProtoComment(existingComment)}, nil
+}
+func (h *ForumHandler) DeleteComment(ctx context.Context, req *forumv1.DeleteCommentRequest) (*forumv1.Empty, error) {
+	h.logger.Info("deleting comment", "comment_id", req.GetId())
+	err := h.commentUC.DeleteComment(ctx, req.GetId())
+	if err != nil {
+		h.logger.Error("failed to delete comment", "error", err)
+		return nil, err
+	}
+	return &forumv1.Empty{}, nil
+}
 
 // ================== Tag Handlers ==================
 func (h *ForumHandler) CreateTag(ctx context.Context, req *forumv1.CreateTagRequest) (*forumv1.TagResponse, error) {
