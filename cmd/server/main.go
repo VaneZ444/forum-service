@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	addr := ":50051"
+	addr := ":50052"
 	dsn := "postgres://postgres:3781@localhost:5432/forum_db?sslmode=disable"
 
 	// Logger
