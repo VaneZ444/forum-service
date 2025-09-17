@@ -563,6 +563,111 @@ func (h *ForumHandler) ListTags(ctx context.Context, req *forumv1.ListTagsReques
 		TotalCount: total,
 	}, nil
 }
+func (h *ForumHandler) ListTagsByPost(ctx context.Context, req *forumv1.ListTagsByPostRequest) (*forumv1.ListTagsResponse, error) {
+	tags, err := h.tagUC.ListTagsByPostID(ctx, req.GetPostId())
+	if err != nil {
+		h.logger.Error("failed to list tags by post", "error", err)
+		return nil, err
+	}
+
+	protoTags := make([]*forumv1.Tag, len(tags))
+	for i, t := range tags {
+		protoTags[i] = &forumv1.Tag{
+			Id:   t.ID,
+			Name: t.Name,
+		}
+	}
+
+	return &forumv1.ListTagsResponse{
+		Tags: protoTags,
+	}, nil
+}
+
+func (h *ForumHandler) AddTagToPost(ctx context.Context, req *forumv1.AddTagToPostRequest) (*forumv1.Empty, error) {
+	h.logger.Info("adding tag to post", "post_id", req.GetPostId(), "tag_id", req.GetTagId())
+
+	if err := h.tagUC.AddTagToPost(ctx, req.GetPostId(), req.GetTagId()); err != nil {
+		h.logger.Error("failed to add tag to post", "error", err)
+		return nil, err
+	}
+
+	return &forumv1.Empty{}, nil
+}
+
+func (h *ForumHandler) RemoveTagFromPost(ctx context.Context, req *forumv1.RemoveTagFromPostRequest) (*forumv1.Empty, error) {
+	h.logger.Info("removing tag from post", "post_id", req.GetPostId(), "tag_id", req.GetTagId())
+
+	if err := h.tagUC.RemoveTagFromPost(ctx, req.GetPostId(), req.GetTagId()); err != nil {
+		h.logger.Error("failed to remove tag from post", "error", err)
+		return nil, err
+	}
+
+	return &forumv1.Empty{}, nil
+}
+func (h *ForumHandler) ListPostsByTag(ctx context.Context, req *forumv1.ListPostsByTagRequest) (*forumv1.ListPostsResponse, error) {
+	h.logger.Info("listing posts by tag", "tag_id", req.GetTagId())
+
+	limit := 50
+	offset := 0
+	if req.Pagination != nil {
+		limit = int(req.Pagination.GetLimit())
+		offset = int(req.Pagination.GetOffset())
+	}
+
+	posts, total, err := h.postUC.ListPostsByTag(ctx, req.GetTagId(), limit, offset)
+	if err != nil {
+		h.logger.Error("failed to list posts by tag", "error", err)
+		return nil, err
+	}
+
+	protoPosts := make([]*forumv1.Post, len(posts))
+	for i, p := range posts {
+		protoPosts[i] = toProtoPost(p)
+	}
+
+	return &forumv1.ListPostsResponse{
+		Posts:      protoPosts,
+		TotalCount: total,
+	}, nil
+}
+
+func (h *ForumHandler) Search(ctx context.Context, req *forumv1.SearchRequest) (*forumv1.SearchResponse, error) {
+	limit := 50
+	offset := 0
+	if req.Pagination != nil {
+		limit = int(req.Pagination.GetLimit())
+		offset = int(req.Pagination.GetOffset())
+	}
+
+	posts, totalPosts, err := h.postUC.SearchPosts(ctx, req.GetQuery(), limit, offset)
+	if err != nil {
+		h.logger.Error("failed to search posts", "error", err)
+		return nil, err
+	}
+
+	topics, totalTopics, err := h.topicUC.SearchTopics(ctx, req.GetQuery(), limit, offset)
+	if err != nil {
+		h.logger.Error("failed to search topics", "error", err)
+		return nil, err
+	}
+
+	protoPosts := make([]*forumv1.Post, len(posts))
+	for i, p := range posts {
+		protoPosts[i] = toProtoPost(p)
+	}
+
+	protoTopics := make([]*forumv1.Topic, len(topics))
+	for i, t := range topics {
+		protoTopics[i] = toProtoTopic(t)
+	}
+
+	return &forumv1.SearchResponse{
+		Posts:       protoPosts,
+		Topics:      protoTopics,
+		TotalPosts:  totalPosts,
+		TotalTopics: totalTopics,
+	}, nil
+}
 
 // ================== Helper Functions ==================
 func toProtoCategory(c *entity.Category) *forumv1.Category {

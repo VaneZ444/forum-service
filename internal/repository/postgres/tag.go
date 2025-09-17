@@ -38,7 +38,7 @@ func (r *TagRepo) GetBySlug(ctx context.Context, slug string) (*entity.Tag, erro
 }
 
 func (r *TagRepo) List(ctx context.Context, limit, offset int) ([]*entity.Tag, int64, error) {
-	const q = `SELECT id, name, slug FROM tags ORDER BY name LIMIT $1 OFFSET $2`
+	const q = `SELECT id, title, slug FROM tags ORDER BY title LIMIT $1 OFFSET $2`
 	rows, err := r.db.QueryContext(ctx, q, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list tags: %w", err)
@@ -115,7 +115,7 @@ func (r *TagRepo) ListByIDs(ctx context.Context, ids []int64) ([]*entity.Tag, er
 
 func (r *TagRepo) Create(ctx context.Context, tag *entity.Tag) (int64, error) {
 	err := r.db.QueryRowContext(ctx,
-		"INSERT INTO tags (name, slug) VALUES ($1, $2) RETURNING id",
+		"INSERT INTO tags (title, slug) VALUES ($1, $2) RETURNING id",
 		tag.Name, tag.Slug).Scan(&tag.ID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create tag: %w", err)

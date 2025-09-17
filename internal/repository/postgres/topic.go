@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
 	"github.com/VaneZ444/forum-service/internal/repository"
@@ -268,7 +269,7 @@ func buildOrderBy(sorting *forumv1.Sorting) string {
 	case forumv1.SortField_SORT_FIELD_CREATED_AT:
 		field = "created_at"
 	case forumv1.SortField_SORT_FIELD_UPDATED_AT:
-		field = "updated_at"
+		field = "last_activity"
 	case forumv1.SortField_SORT_FIELD_TITLE:
 		field = "title"
 	case forumv1.SortField_SORT_FIELD_POPULARITY:
@@ -288,4 +289,40 @@ func buildOrderBy(sorting *forumv1.Sorting) string {
 	}
 
 	return fmt.Sprintf("%s %s", field, order)
+}
+func (r *TopicRepository) Search(ctx context.Context, query string, limit, offset int) ([]*entity.Topic, int64, error) {
+	tsquery := fmt.Sprintf("%s:*", strings.Join(strings.Fields(query), " & "))
+
+	var total int64
+	countQuery := `SELECT COUNT(*) FROM topics WHERE search_vector @@ to_tsquery('english', $1)`
+	if err := r.db.QueryRowContext(ctx, countQuery, tsquery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count topics: %w", err)
+	}
+
+	searchQuery := `
+		SELECT id, title, author_id, category_id, created_at, status, posts_count, views_count, last_activity
+		FROM topics
+		WHERE search_vector @@ to_tsquery('english', $1)
+		ORDER BY ts_rank_cd(search_vector, to_tsquery('english', $1)) DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := r.db.QueryContext(ctx, searchQuery, tsquery, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to search topics: %w", err)
+	}
+	defer rows.Close()
+
+	var topics []*entity.Topic
+	for rows.Next() {
+		var t entity.Topic
+		if err := rows.Scan(
+			&t.ID, &t.Title, &t.AuthorID, &t.CategoryID, &t.CreatedAt,
+			&t.Status, &t.PostsCount, &t.ViewsCount, &t.LastActivity,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan topic: %w", err)
+		}
+		topics = append(topics, &t)
+	}
+
+	return topics, total, nil
 }

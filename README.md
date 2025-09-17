@@ -1,5 +1,5 @@
 # forum-service
- посмотреть про перетягивание ошибок в хендлер из юзкейса, посмотреть про протягивание запроса внутрь юзкейса
+TODO: посмотреть про перетягивание ошибок в хендлер из юзкейса, посмотреть про протягивание запроса внутрь юзкейса
 rpc CreateCategory(CreateCategoryRequest) returns (CategoryResponse); Работает
 rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse); работет
 rpc GetCategory(GetCategoryRequest) returns (CategoryResponse); работет
@@ -23,20 +23,20 @@ rpc DeletePost(DeletePostRequest) returns (Empty); Работает
 // Comments
 rpc CreateComment(CreateCommentRequest) returns (CommentResponse); Работает
 rpc GetComment(GetCommentRequest) returns (CommentResponse); Работает
-rpc ListComments(ListCommentsRequest) returns (ListCommentsResponse); может падать пагинация
-rpc UpdateComment(UpdateCommentRequest) returns (CommentResponse); он существует но проверить нечем
-rpc DeleteComment(DeleteCommentRequest) returns (Empty); он существует но проверить нечем
+rpc ListComments(ListCommentsRequest) returns (ListCommentsResponse); Работает
+rpc UpdateComment(UpdateCommentRequest) returns (CommentResponse); Работает
+rpc DeleteComment(DeleteCommentRequest) returns (Empty); Работает
 
 // Tags
-rpc CreateTag(CreateTagRequest) returns (TagResponse);
-rpc GetTag(GetTagRequest) returns (TagResponse);
-rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+rpc CreateTag(CreateTagRequest) returns (TagResponse); Работает
+rpc GetTag(GetTagRequest) returns (TagResponse); Работает
+rpc ListTags(ListTagsRequest) returns (ListTagsResponse); Работает
 
 // Tag-Post Relationships
-rpc AddTagToPost(AddTagToPostRequest) returns (Empty);
-rpc RemoveTagFromPost(RemoveTagFromPostRequest) returns (Empty);
-rpc ListTagsByPost(ListTagsByPostRequest) returns (ListTagsResponse);
-rpc ListPostsByTag(ListPostsByTagRequest) returns (ListPostsResponse);
+rpc AddTagToPost(AddTagToPostRequest) returns (Empty); Работает
+rpc RemoveTagFromPost(RemoveTagFromPostRequest) returns (Empty); Работает
+rpc ListTagsByPost(ListTagsByPostRequest) returns (ListTagsResponse); Работает
+rpc ListPostsByTag(ListPostsByTagRequest) returns (ListPostsResponse); Работает
 
 // Search
-rpc Search(SearchRequest) returns (SearchResponse);
+rpc Search(SearchRequest) returns (SearchResponse); Работает

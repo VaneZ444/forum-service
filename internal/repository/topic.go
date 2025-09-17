@@ -14,4 +14,5 @@ type TopicRepository interface {
 	List(ctx context.Context, categoryID *int64, limit, offset int, sorting *forumv1.Sorting) ([]*entity.Topic, int64, error)
 	Update(ctx context.Context, topic *entity.Topic) (*entity.Topic, error)
 	Delete(ctx context.Context, id int64) error
+	Search(ctx context.Context, query string, limit, offset int) ([]*entity.Topic, int64, error)
 }

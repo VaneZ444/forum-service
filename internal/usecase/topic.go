@@ -16,6 +16,7 @@ type TopicUseCase interface {
 	List(ctx context.Context, categoryID *int64, limit, offset int, sorting *forumv1.Sorting) ([]*entity.Topic, int64, error)
 	UpdateTopic(ctx context.Context, topic *entity.Topic) (*entity.Topic, error)
 	DeleteTopic(ctx context.Context, id int64) error
+	SearchTopics(ctx context.Context, query string, limit, offset int) ([]*entity.Topic, int64, error)
 }
 
 type topicUseCase struct {
@@ -142,4 +143,13 @@ func (uc *topicUseCase) DeleteTopic(ctx context.Context, id int64) error {
 	}
 
 	return uc.topicRepo.Delete(ctx, id)
+}
+func (uc *topicUseCase) SearchTopics(ctx context.Context, query string, limit, offset int) ([]*entity.Topic, int64, error) {
+	if limit <= 0 || limit > 100 {
+		return nil, 0, ErrInvalidLimit
+	}
+	if offset < 0 {
+		return nil, 0, ErrInvalidOffset
+	}
+	return uc.topicRepo.Search(ctx, query, limit, offset)
 }

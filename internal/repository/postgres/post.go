@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/VaneZ444/forum-service/internal/entity"
@@ -129,17 +130,26 @@ func (r *postRepository) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (r *postRepository) ListByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, error) {
-	query := `SELECT p.id, p.topic_id, p.title, p.content, p.author_id, p.created_at 
-              FROM posts p
-              JOIN post_tags pt ON p.id = pt.post_id
-              WHERE pt.tag_id = $1
-              ORDER BY p.created_at DESC
-              LIMIT $2 OFFSET $3`
+func (r *postRepository) ListByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, int64, error) {
+	// 1) Получаем общее количество
+	var total int64
+	countQuery := `SELECT COUNT(*) FROM post_tags WHERE tag_id = $1`
+	if err := r.db.QueryRowContext(ctx, countQuery, tagID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts by tag: %w", err)
+	}
 
+	// 2) Получаем сами посты
+	query := `
+		SELECT p.id, p.topic_id, p.title, p.content, p.author_id, p.created_at 
+		FROM posts p
+		JOIN post_tags pt ON p.id = pt.post_id
+		WHERE pt.tag_id = $1
+		ORDER BY p.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
 	rows, err := r.db.QueryContext(ctx, query, tagID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list posts by tag: %w", err)
+		return nil, 0, fmt.Errorf("failed to list posts by tag: %w", err)
 	}
 	defer rows.Close()
 
@@ -147,22 +157,33 @@ func (r *postRepository) ListByTag(ctx context.Context, tagID int64, limit, offs
 	for rows.Next() {
 		var p entity.Post
 		if err := rows.Scan(&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan post: %w", err)
+			return nil, 0, fmt.Errorf("failed to scan post: %w", err)
 		}
 		posts = append(posts, &p)
 	}
-	return posts, nil
+
+	return posts, total, nil
 }
 
-func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit int, offset int) ([]*entity.Post, error) {
-	const query = `SELECT id, topic_id, content, author_id, created_at 
-				   FROM posts WHERE topic_id = $1 
-				   ORDER BY created_at ASC
-				   LIMIT $2 OFFSET $3`
+func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, int64, error) {
+	// 1) Get total count
+	var total int64
+	countQuery := `SELECT COUNT(*) FROM posts WHERE topic_id = $1`
+	if err := r.db.QueryRowContext(ctx, countQuery, topicID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts by topic: %w", err)
+	}
 
+	// 2) Get paginated posts
+	query := `
+		SELECT id, topic_id, content, author_id, created_at
+		FROM posts
+		WHERE topic_id = $1
+		ORDER BY created_at ASC
+		LIMIT $2 OFFSET $3
+	`
 	rows, err := r.db.QueryContext(ctx, query, topicID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list posts: %w", err)
+		return nil, 0, fmt.Errorf("failed to list posts by topic: %w", err)
 	}
 	defer rows.Close()
 
@@ -170,17 +191,14 @@ func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit i
 	for rows.Next() {
 		var p entity.Post
 		if err := rows.Scan(&p.ID, &p.TopicID, &p.Content, &p.AuthorID, &p.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan post: %w", err)
+			return nil, 0, fmt.Errorf("failed to scan post: %w", err)
 		}
 		posts = append(posts, &p)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return posts, nil
+	return posts, total, nil
 }
+
 func (r *postRepository) AddView(ctx context.Context, postID, userID int64) error {
 	query := `INSERT INTO post_views (post_id, user_id)
 	 		VALUES ($1, $2)
@@ -231,6 +249,40 @@ func (r *postRepository) List(ctx context.Context, topicID, tagID int64, limit, 
 			return nil, 0, err
 		}
 		posts = append(posts, p)
+	}
+
+	return posts, total, nil
+}
+func (r *postRepository) Search(ctx context.Context, query string, limit, offset int) ([]*entity.Post, int64, error) {
+	// Prepare tsquery
+	tsquery := fmt.Sprintf("%s:*", strings.Join(strings.Fields(query), " & "))
+
+	var total int64
+	countQuery := `SELECT COUNT(*) FROM posts WHERE search_vector @@ to_tsquery('english', $1)`
+	if err := r.db.QueryRowContext(ctx, countQuery, tsquery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count posts: %w", err)
+	}
+
+	searchQuery := `
+		SELECT id, topic_id, title, content, author_id, created_at, updated_at
+		FROM posts
+		WHERE search_vector @@ to_tsquery('english', $1)
+		ORDER BY ts_rank_cd(search_vector, to_tsquery('english', $1)) DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := r.db.QueryContext(ctx, searchQuery, tsquery, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to search posts: %w", err)
+	}
+	defer rows.Close()
+
+	var posts []*entity.Post
+	for rows.Next() {
+		var p entity.Post
+		if err := rows.Scan(&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan post: %w", err)
+		}
+		posts = append(posts, &p)
 	}
 
 	return posts, total, nil

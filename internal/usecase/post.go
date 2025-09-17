@@ -17,12 +17,13 @@ import (
 type PostUseCase interface {
 	CreatePost(ctx context.Context, post *entity.Post) (int64, error)
 	GetPostByID(ctx context.Context, id int64) (*entity.Post, error)
-	ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, error)
+	ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, int64, error)
 	List(ctx context.Context, topicID, tagID int64, limit, offset int) ([]*entity.Post, int64, error)
 	UpdatePost(ctx context.Context, req *forumv1.UpdatePostRequest) (*entity.Post, error)
 	DeletePost(ctx context.Context, id int64) error
-	ListPostsByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, error)
+	ListPostsByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, int64, error)
 	AddView(ctx context.Context, postID, userID int64) error
+	SearchPosts(ctx context.Context, query string, limit, offset int) ([]*entity.Post, int64, error)
 }
 
 type postUseCase struct {
@@ -75,13 +76,14 @@ func (uc *postUseCase) GetPostByID(ctx context.Context, id int64) (*entity.Post,
 	return post, nil
 }
 
-func (uc *postUseCase) ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, error) {
+func (uc *postUseCase) ListByTopic(ctx context.Context, topicID int64, limit, offset int) ([]*entity.Post, int64, error) {
 	if limit <= 0 || limit > 100 {
-		return nil, ErrInvalidLimit
+		return nil, 0, ErrInvalidLimit
 	}
 	if offset < 0 {
-		return nil, ErrInvalidOffset
+		return nil, 0, ErrInvalidOffset
 	}
+
 	return uc.postRepo.ListByTopic(ctx, topicID, limit, offset)
 }
 
@@ -98,6 +100,15 @@ func (uc *postUseCase) List(ctx context.Context, topicID, tagID int64, limit, of
 		return nil, 0, err
 	}
 	return posts, total, nil
+}
+func (uc *postUseCase) SearchPosts(ctx context.Context, query string, limit, offset int) ([]*entity.Post, int64, error) {
+	if limit <= 0 || limit > 100 {
+		return nil, 0, ErrInvalidLimit
+	}
+	if offset < 0 {
+		return nil, 0, ErrInvalidOffset
+	}
+	return uc.postRepo.Search(ctx, query, limit, offset)
 }
 
 func (uc *postUseCase) UpdatePost(ctx context.Context, req *forumv1.UpdatePostRequest) (*entity.Post, error) {
@@ -145,12 +156,18 @@ func (uc *postUseCase) DeletePost(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (uc *postUseCase) ListPostsByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, error) {
+func (uc *postUseCase) ListPostsByTag(ctx context.Context, tagID int64, limit, offset int) ([]*entity.Post, int64, error) {
 	if limit <= 0 || limit > 100 {
-		return nil, ErrInvalidLimit
+		return nil, 0, ErrInvalidLimit
 	}
 	if offset < 0 {
-		return nil, ErrInvalidOffset
+		return nil, 0, ErrInvalidOffset
 	}
-	return uc.postRepo.ListByTag(ctx, tagID, limit, offset)
+
+	posts, total, err := uc.postRepo.ListByTag(ctx, tagID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return posts, total, nil
 }
