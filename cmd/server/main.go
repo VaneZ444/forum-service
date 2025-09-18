@@ -5,7 +5,6 @@ import (
 	"log"
 	"log/slog"
 	"net"
-	"os"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -20,16 +19,8 @@ import (
 )
 
 func main() {
-	// Чтение конфигурации из окружения
-	addr := os.Getenv("FORUM_GRPC_PORT")
-	if addr == "" {
-		addr = ":50052"
-	}
-
-	dsn := os.Getenv("DB_DSN")
-	if dsn == "" {
-		log.Fatal("DB_DSN environment variable is required")
-	}
+	addr := ":50052"
+	dsn := "postgres://postgres:3781@localhost:5432/forum_db?sslmode=disable"
 
 	// Logger
 	logger := slog.New(slog.NewJSONHandler(log.Writer(), nil))
@@ -78,6 +69,7 @@ func main() {
 		return
 	}
 	grpcServer := grpc.NewServer()
+
 	ssov1.RegisterForumServiceServer(grpcServer, forumHandler)
 
 	logger.Info("forum-service is listening", slog.String("addr", addr))
@@ -85,7 +77,6 @@ func main() {
 		logger.Error("failed to serve", slog.String("err", err.Error()))
 	}
 }
-
 func applyMigrations(db *sql.DB) error {
 	driver, err := migratepg.WithInstance(db, &migratepg.Config{})
 	if err != nil {
@@ -101,7 +92,8 @@ func applyMigrations(db *sql.DB) error {
 		return err
 	}
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	err = m.Up()
+	if err != nil && err != migrate.ErrNoChange {
 		return err
 	}
 

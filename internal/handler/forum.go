@@ -166,16 +166,18 @@ func (h *ForumHandler) CreateTopic(ctx context.Context, req *forumv1.CreateTopic
 
 	// Create topic entity
 	topic := &entity.Topic{
-		Title:      req.GetTitle(),
-		AuthorID:   req.GetAuthorId(),
-		CategoryID: req.GetCategoryId(),
+		Title:          req.GetTitle(),
+		AuthorID:       req.GetAuthorId(),
+		AuthorNickname: GetUserNicknameFromCtx(ctx),
+		CategoryID:     req.GetCategoryId(),
 	}
 
 	// Create first post entity
 	post := &entity.Post{
-		Title:    req.GetTitle(),
-		Content:  req.GetContent(),
-		AuthorID: req.GetAuthorId(),
+		Title:          req.GetTitle(),
+		Content:        req.GetContent(),
+		AuthorID:       req.GetAuthorId(),
+		AuthorNickname: GetUserNicknameFromCtx(ctx),
 	}
 
 	topicID, postID, err := h.topicUC.CreateTopic(ctx, topic, post)
@@ -234,15 +236,16 @@ func (h *ForumHandler) UpdateTopic(ctx context.Context, req *forumv1.UpdateTopic
 
 	// 3) Собираем обновлённую сущность
 	topic := &entity.Topic{
-		ID:           existing.ID,
-		Title:        title,
-		CategoryID:   categoryID,
-		AuthorID:     existing.AuthorID,
-		CreatedAt:    existing.CreatedAt,
-		Status:       existing.Status,
-		PostsCount:   existing.PostsCount,
-		ViewsCount:   existing.ViewsCount,
-		LastActivity: time.Now().UTC(), // обновляем активность
+		ID:             existing.ID,
+		Title:          title,
+		CategoryID:     categoryID,
+		AuthorID:       existing.AuthorID,
+		AuthorNickname: existing.AuthorNickname,
+		CreatedAt:      existing.CreatedAt,
+		Status:         existing.Status,
+		PostsCount:     existing.PostsCount,
+		ViewsCount:     existing.ViewsCount,
+		LastActivity:   time.Now().UTC(), // обновляем активность
 	}
 
 	// 4) Апдейт
@@ -316,11 +319,12 @@ func (h *ForumHandler) CreatePost(ctx context.Context, req *forumv1.CreatePostRe
 	h.logger.Info("creating post", "topic_id", req.GetTopicId())
 
 	post := &entity.Post{
-		TopicID:  req.GetTopicId(),
-		AuthorID: req.GetAuthorId(),
-		Title:    req.GetTitle(),
-		Content:  req.GetContent(),
-		Images:   req.GetImages(),
+		TopicID:        req.GetTopicId(),
+		AuthorID:       req.GetAuthorId(),
+		AuthorNickname: GetUserNicknameFromCtx(ctx),
+		Title:          req.GetTitle(),
+		Content:        req.GetContent(),
+		Images:         req.GetImages(),
 	}
 
 	// Add tags if provided
@@ -420,9 +424,10 @@ func (h *ForumHandler) CreateComment(ctx context.Context, req *forumv1.CreateCom
 	h.logger.Info("creating comment", "post_id", req.GetPostId())
 
 	comment := &entity.Comment{
-		PostID:   req.GetPostId(),
-		AuthorID: req.GetAuthorId(),
-		Content:  req.GetContent(),
+		PostID:         req.GetPostId(),
+		AuthorID:       req.GetAuthorId(),
+		AuthorNickname: GetUserNicknameFromCtx(ctx),
+		Content:        req.GetContent(),
 	}
 
 	id, err := h.commentUC.CreateComment(ctx, comment)
@@ -683,15 +688,16 @@ func toProtoCategory(c *entity.Category) *forumv1.Category {
 
 func toProtoTopic(t *entity.Topic) *forumv1.Topic {
 	return &forumv1.Topic{
-		Id:           t.ID,
-		Title:        t.Title,
-		AuthorId:     t.AuthorID,
-		CategoryId:   t.CategoryID,
-		CreatedAt:    timestamppb.New(t.CreatedAt),
-		Status:       forumv1.Status(t.Status),
-		PostsCount:   t.PostsCount,
-		ViewsCount:   t.ViewsCount,
-		LastActivity: timestamppb.New(t.LastActivity),
+		Id:             t.ID,
+		Title:          t.Title,
+		AuthorId:       t.AuthorID,
+		AuthorNickname: t.AuthorNickname,
+		CategoryId:     t.CategoryID,
+		CreatedAt:      timestamppb.New(t.CreatedAt),
+		Status:         forumv1.Status(t.Status),
+		PostsCount:     t.PostsCount,
+		ViewsCount:     t.ViewsCount,
+		LastActivity:   timestamppb.New(t.LastActivity),
 	}
 }
 
@@ -702,30 +708,32 @@ func toProtoPost(p *entity.Post) *forumv1.Post {
 	}
 
 	return &forumv1.Post{
-		Id:            p.ID,
-		TopicId:       p.TopicID,
-		AuthorId:      p.AuthorID,
-		Title:         p.Title,
-		Content:       p.Content,
-		Images:        p.Images,
-		Tags:          tags,
-		CreatedAt:     timestamppb.New(p.CreatedAt),
-		UpdatedAt:     timestamppb.New(p.UpdatedAt),
-		Status:        forumv1.Status(p.Status),
-		ViewsCount:    p.ViewsCount,
-		CommentsCount: p.CommentsCount,
-		LikesCount:    p.LikesCount,
+		Id:             p.ID,
+		TopicId:        p.TopicID,
+		AuthorId:       p.AuthorID,
+		AuthorNickname: p.AuthorNickname,
+		Title:          p.Title,
+		Content:        p.Content,
+		Images:         p.Images,
+		Tags:           tags,
+		CreatedAt:      timestamppb.New(p.CreatedAt),
+		UpdatedAt:      timestamppb.New(p.UpdatedAt),
+		Status:         forumv1.Status(p.Status),
+		ViewsCount:     p.ViewsCount,
+		CommentsCount:  p.CommentsCount,
+		LikesCount:     p.LikesCount,
 	}
 }
 
 func toProtoComment(c *entity.Comment) *forumv1.Comment {
 	return &forumv1.Comment{
-		Id:        c.ID,
-		PostId:    c.PostID,
-		AuthorId:  c.AuthorID,
-		Content:   c.Content,
-		CreatedAt: timestamppb.New(c.CreatedAt),
-		UpdatedAt: timestamppb.New(c.UpdatedAt),
+		Id:             c.ID,
+		PostId:         c.PostID,
+		AuthorId:       c.AuthorID,
+		AuthorNickname: c.AuthorNickname,
+		Content:        c.Content,
+		CreatedAt:      timestamppb.New(c.CreatedAt),
+		UpdatedAt:      timestamppb.New(c.UpdatedAt),
 	}
 }
 

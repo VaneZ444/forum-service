@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 
 	"google.golang.org/grpc/metadata"
@@ -37,6 +38,6 @@ func GetUserNicknameFromCtx(ctx context.Context) string {
 	if len(nicks) == 0 {
 		return ""
 	}
-
+	slog.Info("ctx nickname", "nickname", nicks[0])
 	return nicks[0]
 }
