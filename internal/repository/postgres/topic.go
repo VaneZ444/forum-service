@@ -29,36 +29,36 @@ func (r *TopicRepository) CreateWithPost(ctx context.Context, topic *entity.Topi
 
 	// Insert topic
 	topicQuery := `
-		INSERT INTO topics (title, author_id, category_id, created_at, last_activity)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO topics (title, author_id, author_nickname, category_id, created_at, last_activity)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
 	`
-	err = tx.QueryRowContext(ctx, topicQuery,
+	if err := tx.QueryRowContext(ctx, topicQuery,
 		topic.Title,
 		topic.AuthorID,
+		topic.AuthorNickname,
 		topic.CategoryID,
 		topic.CreatedAt,
 		topic.CreatedAt,
-	).Scan(&topic.ID)
-	if err != nil {
+	).Scan(&topic.ID); err != nil {
 		return fmt.Errorf("failed to create topic: %w", err)
 	}
 
 	// Insert first post
 	post.TopicID = topic.ID
 	postQuery := `
-		INSERT INTO posts (topic_id, author_id, title, content, created_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO posts (topic_id, author_id, author_nickname, title, content, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
 	`
-	err = tx.QueryRowContext(ctx, postQuery,
+	if err := tx.QueryRowContext(ctx, postQuery,
 		post.TopicID,
 		post.AuthorID,
+		post.AuthorNickname,
 		post.Title,
 		post.Content,
 		post.CreatedAt,
-	).Scan(&post.ID)
-	if err != nil {
+	).Scan(&post.ID); err != nil {
 		return fmt.Errorf("failed to create first post: %w", err)
 	}
 
@@ -68,7 +68,7 @@ func (r *TopicRepository) CreateWithPost(ctx context.Context, topic *entity.Topi
 func (r *TopicRepository) GetByID(ctx context.Context, id int64) (*entity.Topic, error) {
 	query := `
 		SELECT 
-			id, title, author_id, category_id, created_at, 
+			id, title, author_id, author_nickname, category_id, created_at, 
 			posts_count, views_count, last_activity, status
 		FROM topics
 		WHERE id = $1
@@ -78,10 +78,9 @@ func (r *TopicRepository) GetByID(ctx context.Context, id int64) (*entity.Topic,
 
 	topic := &entity.Topic{}
 	err := row.Scan(
-		&topic.ID, &topic.Title, &topic.AuthorID, &topic.CategoryID, &topic.CreatedAt,
+		&topic.ID, &topic.Title, &topic.AuthorID, &topic.AuthorNickname, &topic.CategoryID, &topic.CreatedAt,
 		&topic.PostsCount, &topic.ViewsCount, &topic.LastActivity, &topic.Status,
 	)
-
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, repository.ErrNotFound
@@ -95,9 +94,9 @@ func (r *TopicRepository) GetByID(ctx context.Context, id int64) (*entity.Topic,
 func (r *TopicRepository) GetByIDWithFirstPost(ctx context.Context, id int64) (*entity.Topic, *entity.Post, error) {
 	query := `
 		SELECT 
-			t.id, t.title, t.author_id, t.category_id, t.created_at, 
+			t.id, t.title, t.author_id, t.author_nickname, t.category_id, t.created_at, 
 			t.posts_count, t.views_count, t.last_activity, t.status,
-			p.id, p.author_id, p.title, p.content, p.created_at
+			p.id, p.author_id, p.author_nickname, p.title, p.content, p.created_at
 		FROM topics t
 		JOIN posts p ON t.id = p.topic_id
 		WHERE t.id = $1
@@ -111,9 +110,9 @@ func (r *TopicRepository) GetByIDWithFirstPost(ctx context.Context, id int64) (*
 	post := &entity.Post{}
 
 	err := row.Scan(
-		&topic.ID, &topic.Title, &topic.AuthorID, &topic.CategoryID, &topic.CreatedAt,
+		&topic.ID, &topic.Title, &topic.AuthorID, &topic.AuthorNickname, &topic.CategoryID, &topic.CreatedAt,
 		&topic.PostsCount, &topic.ViewsCount, &topic.LastActivity, &topic.Status,
-		&post.ID, &post.AuthorID, &post.Title, &post.Content, &post.CreatedAt,
+		&post.ID, &post.AuthorID, &post.AuthorNickname, &post.Title, &post.Content, &post.CreatedAt,
 	)
 
 	if err != nil {
@@ -129,8 +128,8 @@ func (r *TopicRepository) GetByIDWithFirstPost(ctx context.Context, id int64) (*
 
 func (r *TopicRepository) List(ctx context.Context, categoryID *int64, limit, offset int, sorting *forumv1.Sorting) ([]*entity.Topic, int64, error) {
 	query := `
-		SELECT id, title, author_id, category_id, created_at, 
-		       posts_count, views_count, last_activity, status
+		SELECT id, title, author_id, author_nickname, category_id, created_at, 
+			posts_count, views_count, last_activity, status
 		FROM topics
 	`
 	countQuery := `SELECT COUNT(*) FROM topics`
@@ -159,7 +158,7 @@ func (r *TopicRepository) List(ctx context.Context, categoryID *int64, limit, of
 	for rows.Next() {
 		t := &entity.Topic{}
 		if err := rows.Scan(
-			&t.ID, &t.Title, &t.AuthorID, &t.CategoryID, &t.CreatedAt,
+			&t.ID, &t.Title, &t.AuthorID, &t.AuthorNickname, &t.CategoryID, &t.CreatedAt,
 			&t.PostsCount, &t.ViewsCount, &t.LastActivity, &t.Status,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan topic: %w", err)
@@ -179,14 +178,15 @@ func (r *TopicRepository) List(ctx context.Context, categoryID *int64, limit, of
 func (r *TopicRepository) Update(ctx context.Context, topic *entity.Topic) (*entity.Topic, error) {
 	const query = `
 		UPDATE topics
-		SET title = $1, category_id = $2, last_activity = $3
-		WHERE id = $4
-		RETURNING id, title, author_id, category_id, created_at, status, posts_count, views_count, last_activity
+		SET title = $1, author_nickname = $2, category_id = $3, last_activity = $4
+		WHERE id = $5
+		RETURNING id, title, author_id, author_nickname, category_id, created_at, status, posts_count, views_count, last_activity
 	`
 
 	updatedTopic := &entity.Topic{}
 	err := r.db.QueryRowContext(ctx, query,
 		topic.Title,
+		topic.AuthorNickname, // добавлено
 		topic.CategoryID,
 		topic.LastActivity,
 		topic.ID,
@@ -194,6 +194,7 @@ func (r *TopicRepository) Update(ctx context.Context, topic *entity.Topic) (*ent
 		&updatedTopic.ID,
 		&updatedTopic.Title,
 		&updatedTopic.AuthorID,
+		&updatedTopic.AuthorNickname, // добавлено
 		&updatedTopic.CategoryID,
 		&updatedTopic.CreatedAt,
 		&updatedTopic.Status,
@@ -201,7 +202,6 @@ func (r *TopicRepository) Update(ctx context.Context, topic *entity.Topic) (*ent
 		&updatedTopic.ViewsCount,
 		&updatedTopic.LastActivity,
 	)
-
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, repository.ErrNotFound
@@ -300,7 +300,7 @@ func (r *TopicRepository) Search(ctx context.Context, query string, limit, offse
 	}
 
 	searchQuery := `
-		SELECT id, title, author_id, category_id, created_at, status, posts_count, views_count, last_activity
+		SELECT id, title, author_id, author_nickname, category_id, created_at, status, posts_count, views_count, last_activity
 		FROM topics
 		WHERE search_vector @@ to_tsquery('english', $1)
 		ORDER BY ts_rank_cd(search_vector, to_tsquery('english', $1)) DESC
@@ -316,7 +316,7 @@ func (r *TopicRepository) Search(ctx context.Context, query string, limit, offse
 	for rows.Next() {
 		var t entity.Topic
 		if err := rows.Scan(
-			&t.ID, &t.Title, &t.AuthorID, &t.CategoryID, &t.CreatedAt,
+			&t.ID, &t.Title, &t.AuthorID, &t.AuthorNickname, &t.CategoryID, &t.CreatedAt,
 			&t.Status, &t.PostsCount, &t.ViewsCount, &t.LastActivity,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan topic: %w", err)

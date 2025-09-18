@@ -26,3 +26,17 @@ func GetUserIDFromCtx(ctx context.Context) int64 {
 
 	return userID
 }
+
+func GetUserNicknameFromCtx(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+
+	nicks := md.Get("nickname")
+	if len(nicks) == 0 {
+		return ""
+	}
+
+	return nicks[0]
+}

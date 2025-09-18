@@ -18,9 +18,19 @@ func NewCommentRepository(db *sql.DB) repository.CommentRepository {
 }
 
 func (r *commentRepository) Create(ctx context.Context, comment *entity.Comment) (int64, error) {
-	const query = `INSERT INTO comments (post_id, content, author_id, created_at) VALUES ($1, $2, $3, $4) RETURNING id`
+	const query = `
+	INSERT INTO comments (post_id, content, author_id, author_nickname, created_at) 
+	VALUES ($1, $2, $3, $4, $5) 
+	RETURNING id
+	`
 
-	err := r.db.QueryRowContext(ctx, query, comment.PostID, comment.Content, comment.AuthorID, comment.CreatedAt).Scan(&comment.ID)
+	err := r.db.QueryRowContext(ctx, query,
+		comment.PostID,
+		comment.Content,
+		comment.AuthorID,
+		comment.AuthorNickname,
+		comment.CreatedAt,
+	).Scan(&comment.ID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create comment: %w", err)
 	}
@@ -38,14 +48,13 @@ func (r *commentRepository) Delete(ctx context.Context, commentID int64) error {
 
 func (r *commentRepository) Update(ctx context.Context, comment *entity.Comment) error {
 	const query = `
-        UPDATE comments
-        SET content = $1, updated_at = $2
-        WHERE id = $3
-    `
-	_, err := r.db.ExecContext(
-		ctx,
-		query,
+	UPDATE comments
+	SET content = $1, author_nickname = $2, updated_at = $3
+	WHERE id = $4
+	`
+	_, err := r.db.ExecContext(ctx, query,
 		comment.Content,
+		comment.AuthorNickname,
 		comment.UpdatedAt,
 		comment.ID,
 	)
@@ -56,10 +65,13 @@ func (r *commentRepository) Update(ctx context.Context, comment *entity.Comment)
 }
 
 func (r *commentRepository) GetByID(ctx context.Context, id int64) (*entity.Comment, error) {
-	const query = `SELECT id, post_id, content, author_id, created_at FROM comments WHERE id = $1`
+	const query = `SELECT id, post_id, content, author_id, author_nickname, created_at, updated_at 
+               FROM comments WHERE id = $1`
 
 	var c entity.Comment
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.CreatedAt)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.AuthorNickname, &c.CreatedAt, &c.UpdatedAt,
+	)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("comment not found: %w", err)
@@ -76,10 +88,11 @@ func (r *commentRepository) ListByPost(ctx context.Context, postID int64, limit,
 		return nil, 0, fmt.Errorf("failed to count comments: %w", err)
 	}
 
-	const q = `SELECT id, post_id, content, author_id, created_at
-               FROM comments WHERE post_id = $1
-               ORDER BY created_at ASC
-               LIMIT $2 OFFSET $3`
+	const q = `SELECT id, post_id, content, author_id, author_nickname, created_at, updated_at
+           FROM comments 
+           WHERE post_id = $1
+           ORDER BY created_at ASC
+           LIMIT $2 OFFSET $3`
 	rows, err := r.db.QueryContext(ctx, q, postID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list comments: %w", err)
@@ -89,7 +102,7 @@ func (r *commentRepository) ListByPost(ctx context.Context, postID int64, limit,
 	var items []*entity.Comment
 	for rows.Next() {
 		c := new(entity.Comment)
-		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.AuthorNickname, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, c)

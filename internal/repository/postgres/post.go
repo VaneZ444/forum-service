@@ -21,8 +21,8 @@ func NewPostRepository(db *sql.DB) repository.PostRepository {
 
 func (r *postRepository) Create(ctx context.Context, post *entity.Post) (int64, error) {
 	const query = `
-	INSERT INTO posts (topic_id, title, content, author_id, created_at) 
-	VALUES ($1, $2, $3, $4, $5) 
+	INSERT INTO posts (topic_id, title, content, author_id, author_nickname, created_at) 
+	VALUES ($1, $2, $3, $4, $5, $6) 
 	RETURNING id
 	`
 
@@ -31,6 +31,7 @@ func (r *postRepository) Create(ctx context.Context, post *entity.Post) (int64, 
 		post.Title,
 		post.Content,
 		post.AuthorID,
+		post.AuthorNickname, // добавлено
 		post.CreatedAt,
 	).Scan(&post.ID)
 
@@ -42,18 +43,17 @@ func (r *postRepository) Create(ctx context.Context, post *entity.Post) (int64, 
 }
 
 func (r *postRepository) GetByID(ctx context.Context, id int64) (*entity.Post, error) {
-	const query = `SELECT id, topic_id, content, author_id, created_at FROM posts WHERE id = $1`
+	const query = `SELECT id, topic_id, title, content, author_id, author_nickname, created_at, updated_at 
+               FROM posts WHERE id = $1`
 
 	row := r.db.QueryRowContext(ctx, query, id)
-
 	var post entity.Post
-	if err := row.Scan(&post.ID, &post.TopicID, &post.Content, &post.AuthorID, &post.CreatedAt); err != nil {
+	if err := row.Scan(&post.ID, &post.TopicID, &post.Title, &post.Content, &post.AuthorID, &post.AuthorNickname, &post.CreatedAt, &post.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("post not found: %w", err)
 		}
 		return nil, fmt.Errorf("failed to get post by ID: %w", err)
 	}
-
 	return &post, nil
 }
 
@@ -61,12 +61,13 @@ func (r *postRepository) Update(ctx context.Context, post *entity.Post) error {
 	// Обновляем пост
 	query := `
 		UPDATE posts
-		SET title = $1, content = $2, updated_at = $3
-		WHERE id = $4
+		SET title = $1, content = $2, author_nickname = $3, updated_at = $4
+		WHERE id = $5
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		post.Title,
 		post.Content,
+		post.AuthorNickname, // добавлено
 		time.Now().UTC(),
 		post.ID,
 	)
@@ -140,7 +141,7 @@ func (r *postRepository) ListByTag(ctx context.Context, tagID int64, limit, offs
 
 	// 2) Получаем сами посты
 	query := `
-		SELECT p.id, p.topic_id, p.title, p.content, p.author_id, p.created_at 
+		SELECT p.id, p.topic_id, p.title, p.content, p.author_id, p.author_nickname, p.created_at
 		FROM posts p
 		JOIN post_tags pt ON p.id = pt.post_id
 		WHERE pt.tag_id = $1
@@ -156,7 +157,9 @@ func (r *postRepository) ListByTag(ctx context.Context, tagID int64, limit, offs
 	var posts []*entity.Post
 	for rows.Next() {
 		var p entity.Post
-		if err := rows.Scan(&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.AuthorNickname, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan post: %w", err)
 		}
 		posts = append(posts, &p)
@@ -175,7 +178,7 @@ func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit, 
 
 	// 2) Get paginated posts
 	query := `
-		SELECT id, topic_id, content, author_id, created_at
+		SELECT id, topic_id, title, content, author_id, author_nickname, created_at, updated_at
 		FROM posts
 		WHERE topic_id = $1
 		ORDER BY created_at ASC
@@ -190,7 +193,9 @@ func (r *postRepository) ListByTopic(ctx context.Context, topicID int64, limit, 
 	var posts []*entity.Post
 	for rows.Next() {
 		var p entity.Post
-		if err := rows.Scan(&p.ID, &p.TopicID, &p.Content, &p.AuthorID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.AuthorNickname, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan post: %w", err)
 		}
 		posts = append(posts, &p)
@@ -211,8 +216,8 @@ func (r *postRepository) AddView(ctx context.Context, postID, userID int64) erro
 	return nil
 }
 func (r *postRepository) List(ctx context.Context, topicID, tagID int64, limit, offset int) ([]*entity.Post, int64, error) {
-	query := `SELECT id, title, content, author_id, topic_id, created_at, updated_at 
-              FROM posts WHERE 1=1`
+	query := `SELECT id, topic_id, title, content, author_id, author_nickname, created_at, updated_at
+		FROM posts WHERE 1=1`
 	args := []interface{}{}
 	idx := 1
 
@@ -245,7 +250,9 @@ func (r *postRepository) List(ctx context.Context, topicID, tagID int64, limit, 
 	var posts []*entity.Post
 	for rows.Next() {
 		p := new(entity.Post)
-		if err := rows.Scan(&p.ID, &p.Title, &p.Content, &p.AuthorID, &p.TopicID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.AuthorNickname, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
 			return nil, 0, err
 		}
 		posts = append(posts, p)
@@ -264,7 +271,7 @@ func (r *postRepository) Search(ctx context.Context, query string, limit, offset
 	}
 
 	searchQuery := `
-		SELECT id, topic_id, title, content, author_id, created_at, updated_at
+		SELECT id, topic_id, title, content, author_id, author_nickname, created_at, updated_at
 		FROM posts
 		WHERE search_vector @@ to_tsquery('english', $1)
 		ORDER BY ts_rank_cd(search_vector, to_tsquery('english', $1)) DESC
@@ -279,7 +286,9 @@ func (r *postRepository) Search(ctx context.Context, query string, limit, offset
 	var posts []*entity.Post
 	for rows.Next() {
 		var p entity.Post
-		if err := rows.Scan(&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&p.ID, &p.TopicID, &p.Title, &p.Content, &p.AuthorID, &p.AuthorNickname, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan post: %w", err)
 		}
 		posts = append(posts, &p)
