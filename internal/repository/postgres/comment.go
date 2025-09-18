@@ -49,13 +49,12 @@ func (r *commentRepository) Delete(ctx context.Context, commentID int64) error {
 func (r *commentRepository) Update(ctx context.Context, comment *entity.Comment) error {
 	const query = `
 	UPDATE comments
-	SET content = $1, author_nickname = $2, updated_at = $3
-	WHERE id = $4
+	SET content = $1, author_nickname = $2
+	WHERE id = $3
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		comment.Content,
 		comment.AuthorNickname,
-		comment.UpdatedAt,
 		comment.ID,
 	)
 	if err != nil {
@@ -65,12 +64,12 @@ func (r *commentRepository) Update(ctx context.Context, comment *entity.Comment)
 }
 
 func (r *commentRepository) GetByID(ctx context.Context, id int64) (*entity.Comment, error) {
-	const query = `SELECT id, post_id, content, author_id, author_nickname, created_at, updated_at 
+	const query = `SELECT id, post_id, content, author_id, author_nickname, created_at 
                FROM comments WHERE id = $1`
 
 	var c entity.Comment
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.AuthorNickname, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.AuthorNickname, &c.CreatedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -88,7 +87,7 @@ func (r *commentRepository) ListByPost(ctx context.Context, postID int64, limit,
 		return nil, 0, fmt.Errorf("failed to count comments: %w", err)
 	}
 
-	const q = `SELECT id, post_id, content, author_id, author_nickname, created_at, updated_at
+	const q = `SELECT id, post_id, content, author_id, author_nickname, created_at
            FROM comments 
            WHERE post_id = $1
            ORDER BY created_at ASC
@@ -102,7 +101,7 @@ func (r *commentRepository) ListByPost(ctx context.Context, postID int64, limit,
 	var items []*entity.Comment
 	for rows.Next() {
 		c := new(entity.Comment)
-		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.AuthorNickname, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.PostID, &c.Content, &c.AuthorID, &c.AuthorNickname, &c.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, c)
